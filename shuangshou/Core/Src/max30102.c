@@ -55,7 +55,6 @@ static uint32_t ir_dc_sum    = 0;
 static uint32_t red_dc_sum   = 0;
 static uint8_t  dc_count     = 0;
 static uint32_t ir_dc_est    = 1;
-static uint32_t red_dc_est   = 1;
 static int32_t  ir_ac_max    = 0;
 static int32_t  ir_ac_min    = 0;
 static uint32_t last_peak_ms = 0;
@@ -263,7 +262,7 @@ static void ppg_process(void)
     if (dc_count == 0U) return;
 
     ir_dc_est  = ir_dc_sum  / dc_count;
-    red_dc_est = red_dc_sum / dc_count;
+    (void)red_dc_sum;  /* SpO2 待校准, 暂用 DC 累加器占位 */
 
     uint32_t now = HAL_GetTick();
 
@@ -337,7 +336,7 @@ void MAX30102_ResetHistory(void)
     memset(max30102_buf, 0, sizeof(max30102_buf));
     max30102_buf_idx = 0; max30102_ready = 0;
     ir_dc_sum  = 0; red_dc_sum = 0; dc_count = 0;
-    ir_dc_est  = 1; red_dc_est = 1;
+    ir_dc_est  = 1;
     ir_ac_max  = 0; ir_ac_min  = 0;
 }
 
