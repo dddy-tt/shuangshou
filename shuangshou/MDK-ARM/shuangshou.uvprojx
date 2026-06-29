@@ -580,6 +580,11 @@
               <FileType>1</FileType>
               <FilePath>..\Core\Src\vibrator.c</FilePath>
             </File>
+            <File>
+              <FileName>max30102.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\max30102.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
