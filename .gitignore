@@ -1,0 +1,22 @@
+# ── Keil MDK 编译中间文件 ──
+*.o
+*.d
+*.crf
+*.axf
+*.hex
+*.lst
+*.lnp
+*.dep
+*.htm
+*.build_log.htm
+*.dbgconf
+*.map
+*.uvguix.*
+
+# ── Claude AI 本地设置 ──
+.claude/
+
+# ── OS 文件 ──
+Thumbs.db
+*.swp
+*.swo
