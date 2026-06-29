@@ -83,5 +83,7 @@ void Flex_Update(void);
 uint8_t Flex_GetPercent(uint8_t hand, uint8_t finger);
 uint8_t Flex_CheckSpasm(uint8_t hand, uint8_t finger);
 uint32_t Flex_CalcSquaredDistance(uint8_t hand, uint8_t *standard_pose);
+uint8_t Flex_HasValidSnapshot(uint8_t hand);
+uint8_t Flex_GetSnapshotSeenMask(void);
 
 #endif /* __FLEX_SENSOR_H */

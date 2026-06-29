@@ -37,6 +37,7 @@
 #include "vibrator.h"
 #include "gesture.h"
 #include "max30102.h"
+#include "bringup_diag.h"
 #include "soft_uart.h"
 #include "math.h"
 #include "stdio.h"
@@ -146,6 +147,7 @@ int main(void)
   HAL_TIM_Base_Start_IT(&htim3);
 
   /* USER CODE BEGIN 2 */
+  BringupDiag_Init();
 
   /* 阶段 1：基础通信与采样链路初始化 */
   SoftI2C_Init();      /* 三路软 I2C 总线复位并确认空闲 */
@@ -157,10 +159,16 @@ int main(void)
 
   /* 阶段 3：初始化双路 JY61P（已替代旧注释中的 MPU6050） */
   if (JY61P_Init(JY61P_CH_RIGHT) != 0) {
+      BringupDiag_SetJYRight(0);
       /* 右手 JY61P 未就绪：检查 3.3V 供电及是否已切换到 I2C 模式 */
+  } else {
+      BringupDiag_SetJYRight(1);
   }
   if (JY61P_Init(JY61P_CH_LEFT) != 0) {
+      BringupDiag_SetJYLeft(0);
       /* 左手 JY61P 未就绪：排查项同上 */
+  } else {
+      BringupDiag_SetJYLeft(1);
   }
 
   /* 阶段 4：初始化外设模块 */
@@ -175,12 +183,15 @@ int main(void)
       uint8_t max30102_status = MAX30102_Init();
       if (max30102_status == 0) {
           max30102_present = 1;
+          BringupDiag_SetMAX30102(1);
       } else {
           max30102_present = 0;
+          BringupDiag_SetMAX30102(0);
           /* MAX30102 不在线时，仅关闭心率/血氧功能，不阻塞其他模块 */
           /* 当前仍处于无实物阶段，这条降级路径也方便空板联调 */
       }
   }
+  BringupDiag_RecomputeDegraded();
 
   /* 阶段 6：启动 UART3 单字节中断接收 */
   HAL_UART_Receive_IT(&huart3, (uint8_t *)&uart3_rx_byte, 1);
@@ -392,6 +403,7 @@ int main(void)
 
     /* 任务 6：200ms / 5Hz，蓝牙遥测帧 */
     if (now - t_200ms >= 200U) {
+        static uint32_t t_bringup_diag = 0;
         t_200ms = now;
 
         uint8_t frame[20];
@@ -431,6 +443,12 @@ int main(void)
         frame[pos++] = 0xBBU;
 
         BT_SendRaw(frame, pos);
+
+        BringupDiag_SetADCSeen(Flex_HasValidSnapshot(0), Flex_HasValidSnapshot(1));
+        if ((now - t_bringup_diag) >= 1000U) {
+            t_bringup_diag = now;
+            (void)BringupDiag_TrySend(&huart3);
+        }
     }
 
     /* USER CODE END WHILE */

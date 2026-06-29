@@ -561,6 +561,11 @@
               <FilePath>..\Core\Src\flex_sensor.c</FilePath>
             </File>
             <File>
+              <FileName>bringup_diag.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\bringup_diag.c</FilePath>
+            </File>
+            <File>
               <FileName>gesture.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Core\Src\gesture.c</FilePath>
