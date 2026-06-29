@@ -44,12 +44,13 @@
 /* USER CODE BEGIN Includes */
 #include "soft_i2c.h"
 #include "flex_sensor.h"
-#include "mpu6050.h"
+#include "jy61p.h"
 #include "dfplayer.h"
 #include "bluetooth.h"
 #include "vibrator.h"
 #include "gesture.h"
 #include "max30102.h"
+#include "math.h"
 #include "stdio.h"
 #include "string.h"
 /* USER CODE END Includes */
@@ -118,6 +119,15 @@ static volatile uint8_t uart3_rx_byte;
 /* ── MAX30102 初始化状态 ── */
 static uint8_t max30102_present = 0;  /* 1=传感器初始化成功 */
 
+/* ── 三步跌倒检测状态 (基于 JY61P 加速度) ── */
+static uint8_t  fall_state = 0;        /* 0=正常, 1=失重, 2=撞击 */
+static uint32_t fall_t_freefall = 0;
+static uint32_t fall_t_impact = 0;
+
+/* ── JY61P 全局数据引用 (外部声明) ── */
+extern JY61P_Data_t JY61P_Right;
+extern JY61P_Data_t JY61P_Left;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -171,14 +181,13 @@ int main(void)
   HAL_ADC_Start_DMA(&hadc2, (uint32_t *)adc2_buf, 5);
 
   /* ═══════════════════════════════════════════════════════════════
-   * 阶段 3: 惯性传感器初始化 (含 200 样本陀螺仪零漂校准)
+   * 阶段 3: JY61P 惯性传感器初始化 (零硬件改线, 直替原 MPU6050 位置)
    * ═══════════════════════════════════════════════════════════════ */
-  if (MPU6050_Init_Right() != 0) {
-      /* 右手 MPU6050 初始化失败 — 系统仍可运行 (降级为左手单手模式)
-       * TODO: 硬件就绪后, 通过 DFPlayer 播放故障提示音 "右手传感器异常" */
+  if (JY61P_Init(JY61P_CH_RIGHT) != 0) {
+      /* 右手 JY61P 不在线 — 检查: ①供电 3.3V? ②PC上位机已切I2C模式? */
   }
-  if (MPU6050_Init_Left() != 0) {
-      /* 左手 MPU6050 初始化失败 — 同上 */
+  if (JY61P_Init(JY61P_CH_LEFT) != 0) {
+      /* 左手 JY61P 不在线 — 同上 */
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -222,25 +231,26 @@ int main(void)
     uint32_t now = sys_tick_ms;
 
     /* ═══════════════════════════════════════════════════════════
-     * 任务 1:  5ms — MPU6050 原始数据读取 (200Hz)
+     * 任务 1:  5ms — JY61P Burst Read ACC+GYRO+ANGLE (200Hz)
      *
-     * 每次耗时: 右 MPU ~120μs + 左 MPU ~120μs = ~240μs @ 100kHz
-     * 占时隙比: 240μs / 5000μs = 4.8%
+     * 每次耗时: 右 ~560μs + 左 ~560μs ≈ 1120μs @ 400kHz
+     * 占时隙比: 1120μs / 5000μs = 22.4%
      *
-     * 读取后: Accel_X/Y/Z_RAW, Gyro_X/Y/Z_RAW 已更新
-     *         并减去零漂偏移, 转为物理量 (m/s², rad/s)
+     * ★ 一次 Burst Read 即获得: 加速度(m/s²) + 角速度(°/s) + 欧拉角(°)
+     * ★ 不需互补滤波、不需零漂校准 — JY61P 内部卡尔曼已完成
      * ═══════════════════════════════════════════════════════════ */
     if (now - t_5ms >= 5U) {
         t_5ms = now;
-        MPU6050_Read_All_Right();
-        MPU6050_Read_All_Left();
+        float acc[3], gyro[3], angle[3];
+        JY61P_Read_Data(JY61P_CH_RIGHT, acc, gyro, angle);
+        JY61P_Read_Data(JY61P_CH_LEFT,  acc, gyro, angle);
     }
 
     /* ═══════════════════════════════════════════════════════════
-     * 任务 2: 10ms — 姿态解算 + 跌倒检测 + MAX30102 FIFO 分时读取 (100Hz)
+     * 任务 2: 10ms — 跌倒检测 + MAX30102 FIFO 分时读取 (100Hz)
      *
-     * 姿态: 互补滤波 α=0.98 (更新 Pitch/Roll)
-     * 跌倒: 三步判定法 (失重→撞击→静止)
+     * 跌倒: 三步判定法 (失重→撞击→静止), 基于 JY61P 加速度
+     *       数据源: JY61P_Right.acc[] / JY61P_Left.acc[] (m/s²)
      * MAX30102: 读取 1 个 FIFO 样本 (6 字节, ~195μs @ 400kHz)
      *           ★ 采样率 100Hz 严格对齐 10ms 轮询 — 无 FIFO 失步溢出
      *           ★ 内部检查 FIFO_NUM_SAMPLES + 溢出标志
@@ -248,13 +258,38 @@ int main(void)
     if (now - t_10ms >= 10U) {
         t_10ms = now;
 
-        /* 姿态解算 (互补滤波, ~5μs × 2) */
-        MPU6050_Compute_Attitude_Right();
-        MPU6050_Compute_Attitude_Left();
+        /* ── 三步跌倒检测 (右手加速度为主) ── */
+        {
+            float ax = JY61P_Right.acc[0];
+            float ay = JY61P_Right.acc[1];
+            float az = JY61P_Right.acc[2];
+            float a_mag = sqrtf(ax*ax + ay*ay + az*az);
 
-        /* 跌倒检测 (基于当前加速度物理量, ~3μs × 2) */
-        if (MPU6050_FallDetect_Right() || MPU6050_FallDetect_Left()) {
-            sos_flag = 1;
+            switch (fall_state) {
+            case 0: /* 正常 → 检测失重 */
+                if (a_mag < 3.92f) {  /* < 0.4g */
+                    if (fall_t_freefall == 0) fall_t_freefall = now;
+                    if (now - fall_t_freefall > 30) fall_state = 1;
+                } else {
+                    fall_t_freefall = 0;
+                }
+                break;
+            case 1: /* 失重中 → 检测撞击 */
+                if (a_mag > 29.4f) {  /* > 3g */
+                    fall_t_impact = now;
+                    fall_state = 2;
+                }
+                if (now - fall_t_freefall > 2000) { fall_state = 0; fall_t_freefall = 0; }
+                break;
+            case 2: /* 撞击后 → 静止确认 */
+                if (now - fall_t_impact > 10000) {
+                    if (a_mag < 11.76f && a_mag > 7.84f) {  /* 0.8g~1.2g = 静止躺地 */
+                        sos_flag = 1;  /* 跌倒触发 SOS */
+                    }
+                    fall_state = 0;
+                }
+                break;
+            }
         }
 
         /* ── MAX30102 FIFO 分时读取 (100Hz 同频轮询) ── */
@@ -417,10 +452,10 @@ int main(void)
     if (now - t_200ms >= 200U) {
         t_200ms = now;
 
-        char dbg[72];
+        char dbg[96];
         int len = snprintf(dbg, sizeof(dbg),
-                 "<%.1f,%.1f,%d,%d,%d,%d,%d>\r\n",
-                 MPU6050_Right.Pitch, MPU6050_Right.Roll,
+                 "<R:%.1f,P:%.1f,Y:%.1f | %d,%d,%d,%d,%d>\r\n",
+                 JY61P_Right.angle[0], JY61P_Right.angle[1], JY61P_Right.angle[2],
                  Flex_GetPercent(0, 0), Flex_GetPercent(0, 1),
                  Flex_GetPercent(0, 2), Flex_GetPercent(0, 3),
                  Flex_GetPercent(0, 4));

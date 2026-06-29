@@ -566,11 +566,6 @@
               <FilePath>..\Core\Src\gesture.c</FilePath>
             </File>
             <File>
-              <FileName>mpu6050.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\Src\mpu6050.c</FilePath>
-            </File>
-            <File>
               <FileName>soft_i2c.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Core\Src\soft_i2c.c</FilePath>
@@ -584,6 +579,11 @@
               <FileName>max30102.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Core\Src\max30102.c</FilePath>
+            </File>
+            <File>
+              <FileName>jy61p.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\jy61p.c</FilePath>
             </File>
           </Files>
         </Group>

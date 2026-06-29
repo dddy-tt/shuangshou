@@ -23,7 +23,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "gesture.h"
 #include "flex_sensor.h"
-#include "mpu6050.h"
+#include "jy61p.h"
 #include "string.h"
 #include "stdio.h"
 #include "stm32f4xx_hal.h"
@@ -53,14 +53,18 @@
 #define MOTION_THRESH   3000
 
 /**
- * @brief ★ 旋转熔断阈值: 三轴角速度平方和 (rad/s)²
- * @note  60°/s ≈ 1.047 rad/s → 平方 ≈ 1.096
- *        阈值 1.0 (rad/s)² ≈ 57°/s 的等效能级
+ * @brief ★ 旋转熔断阈值: 三轴角速度平方和 (°/s)²
+ * @note  JY61P 角速度单位是 °/s (非 rad/s!)
+ *        60°/s → 平方 = 3600
+ *        阈值 3600 (°/s)² ≈ 60°/s 的等效能级
  *        当手腕以 >60°/s 的角速度翻转时, 触发状态机冻结,
  *        因为此时重力 1g 矢量在各轴间剧烈转移,
  *        会被一阶微分误判为巨大的平移 Jerk.
+ *
+ *        ★ v3.0 升级: 可额外用 JY61P 的 Roll/Pitch 帧间差分
+ *        做双重确认: |Roll_now - Roll_last| > 15° → 翻转
  */
-#define GYRO_ROTATE_THRESH_SQ  1.0f
+#define GYRO_ROTATE_THRESH_SQ  3600.0f  /* (60°/s)², JY61P 单位 */
 
 /**
  * @brief 手形稳定判定: 手指编码需保持不变的时长 (ms)
@@ -193,28 +197,32 @@ static void encode_fingers(char *code)
  *
  * @算法步骤:
  *   1. 将当前 6 轴原始值 (Ax/Ay/Az + Gx/Gy/Gz) 填入环形滑动窗口
+ *      ★ v3.0: 数据源从 MPU6050 改为 JY61P (acc_raw[] + gyro_raw[])
  *   2. ★ 冷启动保护: 若样本数 < JERK_WINDOW 则直接返回 DIR_NONE
- *   3. ★ 旋转熔断: 读取 MPU6050_Right 当前角速度, 计算平方和,
- *      若 > GYRO_ROTATE_THRESH_SQ 则冻结并返回 DIR_NONE
+ *   3. ★ 旋转熔断: 读取 JY61P_Right 当前角速度 (°/s), 计算平方和,
+ *      若 > GYRO_ROTATE_THRESH_SQ (3600 = 60°/s)² 则冻结并返回 DIR_NONE
  *   4. 计算窗口内三轴绝对连续差和 (jerk_x/jerk_y/jerk_z)
  *   5. 若总 jerk < STABLE_THRESH → 静止, 返回 DIR_NONE
  *   6. 识别主导轴 (jerk 最大值所在轴) → 计算该轴净位移方向
  *   7. 返回对应方向码
  *
- * @note   使用加速度原始 LSB 值而非物理量, 避免浮点开销。
- *         方向判定基于净位移 (最后一个样本 - 第一个样本) 的符号。
+ * @note   ★ v3.0 JY61P 适配:
+ *        - acc_raw 量程 ±16g (2048 LSB/g), 约 MPU6050 的 1/8
+ *        - gyro_raw 量程 ±2000°/s (16.4 LSB/(°/s))
+ *        - STABLE_THRESH 需硬件实测后重新校准 (当前值 1500 为 MPU6050 旧值)
+ *        - 方向判定基于净位移 (最后一个样本 - 第一个样本) 的符号
  */
 static uint8_t jerk_detect(void)
 {
-    /* ── 1. 填入当前样本 ── */
-    MPU6050_t *r = &MPU6050_Right;
+    /* ── 1. 填入当前样本 (JY61P 右手原始值) ── */
+    JY61P_Data_t *r = &JY61P_Right;
 
-    ax_hist[jerk_idx] = r->Accel_X_RAW;
-    ay_hist[jerk_idx] = r->Accel_Y_RAW;
-    az_hist[jerk_idx] = r->Accel_Z_RAW;
-    gx_hist[jerk_idx] = r->Gyro_X_RAW;
-    gy_hist[jerk_idx] = r->Gyro_Y_RAW;
-    gz_hist[jerk_idx] = r->Gyro_Z_RAW;
+    ax_hist[jerk_idx] = r->acc_raw[0];
+    ay_hist[jerk_idx] = r->acc_raw[1];
+    az_hist[jerk_idx] = r->acc_raw[2];
+    gx_hist[jerk_idx] = r->gyro_raw[0];
+    gy_hist[jerk_idx] = r->gyro_raw[1];
+    gz_hist[jerk_idx] = r->gyro_raw[2];
     jerk_idx = (jerk_idx + 1U) % JERK_WINDOW;
 
     /* ── 2. ★ 冷启动保护: 窗口未满 20 样本则静默 ── */
@@ -224,8 +232,10 @@ static uint8_t jerk_detect(void)
     }
 
     /* ── 3. ★ 旋转熔断: 检测手腕翻转 ── */
-    /* 用右手 MPU6050 当前物理角速度 (rad/s) 计算旋转能量 */
-    float gyro_energy = r->Gx * r->Gx + r->Gy * r->Gy + r->Gz * r->Gz;
+    /* 用右手 JY61P 物理角速度 (°/s) 计算旋转能量 */
+    float gyro_energy = r->gyro[0] * r->gyro[0]
+                      + r->gyro[1] * r->gyro[1]
+                      + r->gyro[2] * r->gyro[2];
     if (gyro_energy > GYRO_ROTATE_THRESH_SQ) {
         /* 手腕正在快速翻转 (>60°/s 等效) — 冻结 */
         if (!rotation_frozen) {
