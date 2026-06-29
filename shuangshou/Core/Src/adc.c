@@ -352,5 +352,44 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 }
 
 /* USER CODE BEGIN 1 */
+#include "flex_sensor.h"
 
+/**
+  * @brief  ADC DMA Ping-Pong 半传输完成回调
+  * @note   DMA 循环模式, 缓冲共 10 半字 (5 通道 × 2 组)。
+  *         HalfCplt: 前半组 [buf[0]..buf[4]] 刚写完 → 冻结, 标记为新快照
+  *         此时 DMA 正在写后半组 [buf[5]..buf[9]]
+  */
+void HAL_ADC_ConvHalfCpltCallback(ADC_HandleTypeDef *hadc)
+{
+    if (hadc->Instance == ADC1) {
+        /* ADC1 前半组完成 → 稳定半组=0, 标记就绪 */
+        adc_pingpong_half &= ~ADC_PP_HALF_ADC1_MASK;  /* 清低4bit=0 */
+        adc_pingpong_ready |= 0x01U;                   /* bit0=1 */
+    } else if (hadc->Instance == ADC2) {
+        /* ADC2 前半组完成 → 稳定半组=0, 标记就绪 */
+        adc_pingpong_half &= ~(ADC_PP_HALF_ADC1_MASK << ADC_PP_HALF_ADC2_SHIFT);
+        adc_pingpong_ready |= 0x02U;                   /* bit1=1 */
+    }
+}
+
+/**
+  * @brief  ADC DMA Ping-Pong 传输完成回调
+  * @note   Cplt: 后半组 [buf[5]..buf[9]] 刚写完 → 冻结, 标记为新快照
+  *         此时 DMA 回绕到前半组 [buf[0]..buf[4]]
+  */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
+{
+    if (hadc->Instance == ADC1) {
+        /* ADC1 后半组完成 → 稳定半组=1, 标记就绪 */
+        adc_pingpong_half = (adc_pingpong_half & ~ADC_PP_HALF_ADC1_MASK) | 1U;
+        adc_pingpong_ready |= 0x01U;
+    } else if (hadc->Instance == ADC2) {
+        /* ADC2 后半组完成 → 稳定半组=1, 标记就绪 */
+        adc_pingpong_half = (adc_pingpong_half
+                            & ~(ADC_PP_HALF_ADC1_MASK << ADC_PP_HALF_ADC2_SHIFT))
+                           | (1U << ADC_PP_HALF_ADC2_SHIFT);
+        adc_pingpong_ready |= 0x02U;
+    }
+}
 /* USER CODE END 1 */

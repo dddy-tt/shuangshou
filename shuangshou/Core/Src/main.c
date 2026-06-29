@@ -59,22 +59,9 @@
 /* USER CODE BEGIN PTD */
 
 /**
- * @brief ADC DMA 流控制宏 — 用于原子快照防撕裂
- * @note  DMA_SxCR.EN (bit 0) 控制数据流的启停。
- *        在 SxCR 中清零 EN 位即暂停流 (不丢 NDTR 计数),
- *        重新置位后流从断点继续, 不影响循环模式行为。
- *
- *        ⚠️ 暂停期间 ADC 持续发起 DMA 请求但不会被响应,
- *        可能丢失 ~2-3 个采样周期 (约 30-45μs @ 21MHz ADC 时钟),
- *        对 50Hz 传感器更新率来说可接受。
- */
-#define ADC_DMA_PAUSE(hadc)  do { \
-    (hadc)->DMA_Handle->Instance->CR &= ~DMA_SxCR_EN; \
-} while(0)
-
-#define ADC_DMA_RESUME(hadc) do { \
-    (hadc)->DMA_Handle->Instance->CR |= DMA_SxCR_EN;  \
-} while(0)
+ * ★ v2.4 升级: 删除 ADC_DMA_PAUSE/RESUME 宏。
+ *   改用 HAL_ADC_ConvHalfCpltCallback (前半组) 和 ConvCpltCallback (后半组)
+ *   的 Ping-Pong 无锁双缓冲快照, 参见 flex_sensor.c 和 adc.c 的 USER CODE。 */
 
 /* USER CODE END PTD */
 
@@ -96,8 +83,8 @@
 /* USER CODE BEGIN PV */
 
 /* ── ADC DMA 循环缓冲 (每手 5 通道 × uint16_t) ── */
-volatile uint16_t adc1_buf[5];  /* 右手: PA0~PA4 */
-volatile uint16_t adc2_buf[5];  /* 左手: PA5~PA7, PB0~PB1 */
+volatile uint16_t adc1_buf[ADC_PINGPONG_SIZE];  /* 右手 5ch × 2 组 Ping-Pong */
+volatile uint16_t adc2_buf[ADC_PINGPONG_SIZE];  /* 左手 5ch × 2 组 */
 
 /* ── 时序调度时间戳 ── */
 static uint32_t t_5ms   = 0;
@@ -177,8 +164,8 @@ int main(void)
   /* ═══════════════════════════════════════════════════════════════
    * 阶段 2: 启动 ADC DMA 循环扫描 (双 ADC 独立 DMA 流)
    * ═══════════════════════════════════════════════════════════════ */
-  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc1_buf, 5);
-  HAL_ADC_Start_DMA(&hadc2, (uint32_t *)adc2_buf, 5);
+  HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc1_buf, ADC_PINGPONG_SIZE);
+  HAL_ADC_Start_DMA(&hadc2, (uint32_t *)adc2_buf, ADC_PINGPONG_SIZE);
 
   /* ═══════════════════════════════════════════════════════════════
    * 阶段 3: JY61P 惯性传感器初始化 (零硬件改线, 直替原 MPU6050 位置)
@@ -320,18 +307,9 @@ int main(void)
     if (now - t_20ms >= 20U) {
         t_20ms = now;
 
-        /* ── ★ 暂停 ADC DMA 双流 → 冻结缓冲数组 ★ ── */
-        ADC_DMA_PAUSE(&hadc1);  /* DMA2_Stream0.EN = 0 */
-        ADC_DMA_PAUSE(&hadc2);  /* DMA2_Stream2.EN = 0 */
-        __DSB();                /* 数据同步屏障: 确保 EN 位清除生效 */
-
-        /* ── 柔性传感器更新: EMA 滤波 → 百分比映射 → 滑动窗口 ── */
-        /* 此时 adc1_buf 和 adc2_buf 不再被 DMA 改写, 读到的数据是一致的 */
+        /* ── ★ v2.4 Ping-Pong 快照: Flex_Update 内部读取 HalfCplt/Cplt
+         *    锁定的稳定半组, 无需暂停 DMA, 零撕裂保证 ★ ── */
         Flex_Update();
-
-        /* ── ★ 恢复 ADC DMA 双流 ★ ── */
-        ADC_DMA_RESUME(&hadc1);
-        ADC_DMA_RESUME(&hadc2);
 
         /* ── 手指痉挛检测 (基于 Flex_Update 更新后的历史缓冲) ── */
         for (uint8_t f = 0; f < 5; f++) {
