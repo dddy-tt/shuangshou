@@ -375,7 +375,7 @@ int main(void)
     if (now - t_100ms >= 100U) {
         t_100ms = now;
 
-        /* ── ★ v3.0 模式切换检测: 双手全握 "2222222222" 保持 3 秒 ── */
+        /* ── ★ v3.1 模式切换: 双手全握 3 秒 + 冻结手势 + 清空 DFPlayer ── */
         {
             static uint8_t  mode_hold = 0;
             static uint32_t mode_start = 0;
@@ -383,17 +383,26 @@ int main(void)
             Gesture_GetCurrentCode(cur);
             cur[10] = '\0';
             if (strcmp(cur, "2222222222") == 0) {
-                if (!mode_hold) { mode_hold = 1; mode_start = now; }
-                else if (now - mode_start > 3000U) {
+                if (!mode_hold) {
+                    mode_hold = 1;
+                    mode_start = now;
+                    /* ★ 冻结手势输出, 防止 Hold 期间语音寄生触发 (盲点 4) */
+                    Gesture_Freeze();
+                } else if (now - mode_start > 3000U) {
+                    /* ★ 3 秒满 → 先停 DFPlayer 清空残留, 再切模式 (盲点 4) */
+                    DFPlayer_Stop();
                     GestureMode_t m = Gesture_GetMode();
                     m = (GestureMode_t)(((uint8_t)m + 1U) % 3U);
                     Gesture_SetMode(m);
+                    Gesture_Unfreeze();
                     if (m == MODE_TRANSLATE)      DFPlayer_Play(60);
                     else if (m == MODE_CONTROL)   DFPlayer_Play(61);
                     else                           DFPlayer_Play(62);
                     mode_hold = 0;
                 }
             } else {
+                /* 松开 → 解冻, 恢复手势识别 */
+                if (mode_hold) Gesture_Unfreeze();
                 mode_hold = 0;
             }
         }

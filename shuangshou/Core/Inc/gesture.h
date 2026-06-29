@@ -81,6 +81,11 @@ void Gesture_Calibrate(uint8_t hand, uint8_t cal_type);
 GestureMode_t Gesture_GetMode(void);
 void Gesture_SetMode(GestureMode_t mode);
 
+/* ── v3.1: 模式切换期间冻结手势输出 (防止 Hold 期间语音寄生触发) ── */
+void Gesture_Freeze(void);
+void Gesture_Unfreeze(void);
+uint8_t Gesture_IsFrozen(void);
+
 /* ── v3.0 新增: IoT 控制词表 (供 main.c 引用) ── */
 extern const GestureCtrl_t ctrl_vocab[];
 #define CTRL_VOCAB_COUNT  6U

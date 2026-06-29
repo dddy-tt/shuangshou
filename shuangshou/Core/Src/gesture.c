@@ -127,6 +127,9 @@ const GestureCtrl_t ctrl_vocab[] = {
 /* ── ★ v3.0 工作模式 ── */
 static GestureMode_t g_mode = MODE_TRANSLATE;
 
+/* ── ★ v3.1 手势冻结锁 (模式切换 Hold 期间阻止播报) ── */
+static uint8_t g_frozen = 0;
+
 /* ═══════════════════════════════════════════════════════════════════════════
  *  手指编码 (保留)
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -287,7 +290,11 @@ void Gesture_Init(void)
 
 GestureResult_t Gesture_Evaluate(void)
 {
-    GestureResult_t res = {0, 0, ""};
+    GestureResult_t res = {0};
+
+    /* ★ v3.1: 模式切换 Hold 期间冻结所有手势输出 */
+    if (g_frozen) return res;
+
     uint32_t now = HAL_GetTick();
     uint8_t dir;
 
@@ -455,6 +462,10 @@ uint8_t Gesture_Compare(const char *target_code)
 
 GestureMode_t Gesture_GetMode(void) { return g_mode; }
 void Gesture_SetMode(GestureMode_t mode) { g_mode = mode; }
+
+void Gesture_Freeze(void)   { g_frozen = 1; }
+void Gesture_Unfreeze(void) { g_frozen = 0; }
+uint8_t Gesture_IsFrozen(void) { return g_frozen; }
 
 void Gesture_Calibrate(uint8_t hand, uint8_t cal_type)
 {
