@@ -2,6 +2,7 @@
 #include "tim.h"
 
 extern TIM_HandleTypeDef htim4;
+extern volatile uint32_t sys_tick_ms;
 
 /* ── 脉冲自动停止定时 ── */
 static uint32_t pulse_end[2] = {0, 0};  /* 右手 / 左手 */
@@ -28,7 +29,7 @@ void Vibrator_Set(uint8_t hand, uint8_t duty)
 void Vibrator_Pulse(uint8_t hand, uint16_t ms, uint8_t duty)
 {
     Vibrator_Set(hand, duty);
-    pulse_end[hand] = HAL_GetTick() + ms;
+    pulse_end[hand] = sys_tick_ms + ms;
 }
 
 void Vibrator_Stop(uint8_t hand)
@@ -47,7 +48,7 @@ void Vibrator_Stop(uint8_t hand)
  */
 void Vibrator_Tick(void)
 {
-    uint32_t now = HAL_GetTick();
+    uint32_t now = sys_tick_ms;
     for (uint8_t h = 0; h < 2; h++) {
         if (pulse_end[h] != 0 && now >= pulse_end[h]) {
             Vibrator_Stop(h);

@@ -1,3 +1,9 @@
+/*
+ * Legacy notice:
+ * This MPU6050 driver is retained only for history/reference.
+ * The active v3.1 project path uses JY61P via jy61p.c/h.
+ * Do not use this file as the current bring-up or wiring reference.
+ */
 #include "mpu6050.h"
 #include "soft_i2c.h"
 #include "math.h"

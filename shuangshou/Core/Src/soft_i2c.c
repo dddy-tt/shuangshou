@@ -1,3 +1,8 @@
+/*
+ * Active mapping note (v3.1):
+ * SoftI2C_1 and SoftI2C_2 are now used by the two JY61P modules.
+ * Legacy MPU6050 wording below is historical and should not be used for wiring.
+ */
 /**
   ******************************************************************************
   * @file           : soft_i2c.c

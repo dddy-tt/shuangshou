@@ -29,6 +29,8 @@
 #include "string.h"
 #include "stm32f4xx_hal.h"
 
+extern volatile uint32_t sys_tick_ms;
+
 /* ── LED 电流配置 ─────────────────────────────────────────────────────────── */
 #define MAX30102_LED1_CURRENT   0x3FU  /* RED ≈ 12.6mA */
 #define MAX30102_LED2_CURRENT   0x4FU  /* IR  ≈ 15.8mA */
@@ -236,9 +238,10 @@ void MAX30102_ReadFIFO(void)
         }
 
         /* ── 5d. 存入环形缓冲 ── */
-        max30102_buf[max30102_buf_idx].ir    = ir_val;
-        max30102_buf[max30102_buf_idx].red   = red_val;
-        max30102_buf[max30102_buf_idx].valid = sample_valid;
+        max30102_buf[max30102_buf_idx].ir      = ir_val;
+        max30102_buf[max30102_buf_idx].red     = red_val;
+        max30102_buf[max30102_buf_idx].valid   = sample_valid;
+        max30102_buf[max30102_buf_idx].tick_ms = sys_tick_ms;
         max30102_buf_idx = (max30102_buf_idx + 1U) % MAX30102_BUF_LEN;
         max30102_ready = 1U;
 
@@ -264,7 +267,6 @@ static void ppg_process(void)
     ir_dc_est  = ir_dc_sum  / dc_count;
     (void)red_dc_sum;  /* SpO2 待校准, 暂用 DC 累加器占位 */
 
-    uint32_t now = HAL_GetTick();
 
     /* ── 自适应峰值检测: 遍历最近 dc_count 个有效样本 ── */
     for (uint8_t i = 0; i < dc_count; i++) {
@@ -291,10 +293,11 @@ static void ppg_process(void)
 
         int32_t ir_curr = (int32_t)max30102_buf[idx_curr].ir;
         int32_t ir_prev = (int32_t)max30102_buf[idx_prev].ir;
+        uint32_t sample_tick = max30102_buf[idx_curr].tick_ms;
 
         if (ir_prev <= peak_thresh && ir_curr > peak_thresh) {
-            uint32_t interval = now - last_peak_ms;
-            if (interval >= 300U && interval <= 1500U && last_peak_ms > 0U) {
+            uint32_t interval = sample_tick - last_peak_ms;
+            if (last_peak_ms > 0U && interval >= 300U && interval <= 1500U) {
                 peak_intervals[peak_idx] = interval;
                 peak_idx = (peak_idx + 1U) % 5U;
                 if (peak_cnt < 5U) peak_cnt++;
@@ -313,7 +316,7 @@ static void ppg_process(void)
                     if (hr_output > MAX30102_HR_MAX) hr_output = MAX30102_HR_MAX;
                 }
             }
-            last_peak_ms = now;
+            last_peak_ms = sample_tick;
         }
     }
 
@@ -338,6 +341,12 @@ void MAX30102_ResetHistory(void)
     ir_dc_sum  = 0; red_dc_sum = 0; dc_count = 0;
     ir_dc_est  = 1;
     ir_ac_max  = 0; ir_ac_min  = 0;
+    last_peak_ms = 0;
+    memset(peak_intervals, 0, sizeof(peak_intervals));
+    peak_idx = 0;
+    peak_cnt = 0;
+    hr_output = 0;
+    spo2_output = 0;
 }
 
 uint8_t MAX30102_IsOnline(void)

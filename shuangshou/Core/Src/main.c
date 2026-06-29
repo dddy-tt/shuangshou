@@ -2,33 +2,20 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : 双手手语翻译手套 — 主调度框架 (防御性重构 v2.3)
-  * @author         : 专家评审重构版 v2.3
+  * @brief          : 双手手语翻译手套 - 主调度框架（防御性重构 v3.1）
+  * @author         : 项目维护重构版 v3.1
   * @date           : 2026-06-29
-  *
-  * @多速率时序调度 (6 级, 基于 TIM3 1ms 系统 tick):
-  *   ┌──────────┬───────────┬──────────────────────────────────────────┐
-  *   │ 周期     │ 频率      │ 任务内容                                  │
-  *   ├──────────┼───────────┼──────────────────────────────────────────┤
-  *   │  5ms     │ 200Hz     │ MPU6050 双路 14 字节读取 (软件 I2C)       │
-  *   │ 10ms     │ 100Hz     │ 互补滤波姿态解算 + 跌倒检测                │
-  *   │          │           │ MAX30102 FIFO 分时读取 (每 10ms 1 样本)    │
-  *   │ 20ms     │ 50Hz      │ ★ ADC DMA 暂停快照 + 柔性传感器更新        │
-  *   │          │           │ + 手指痉挛检测                             │
-  *   │ 50ms     │ 20Hz      │ 手势识别 (手形编码 + 门限微分法方向)       │
-  *   │          │           │ + DFPlayer 播放触发 + 振动维护              │
-  *   │100ms     │ 10Hz      │ 蓝牙指令消费 + SOS 报警 + MAX30102 PPG     │
-  *   │          │           │ 批量处理 + 心率/血氧超阈值检测              │
-  *   │200ms     │  5Hz      │ 蓝牙调试遥测 (Pitch/Roll/五指百分比)       │
-  *   └──────────┴───────────┴──────────────────────────────────────────┘
-  *
-  * @防御性设计 (v2.3 新增):
-  *   ② ADC DMA 原子快照: 20ms 任务中, 先把 ADC_DMA 两个流 EN 位清 0,
-  *      冻结缓冲数组后再调用 Flex_Update, 杜绝高动态下的数据撕裂
-  *   ③ MAX30102 100Hz 对齐: 10ms 任务中调用 MAX30102_ReadFIFO,
-  *      读取前检查 FIFO_NUM_SAMPLES, 自动处理溢出复位
-  *   ⑦ PPG 边界卡关: 100ms 任务中若 IR < 5000 或 > 200000,
-  *      MAX30102 内部自动阻断算法, main 中仅读取最终 HR/SpO2
+  * @note 多速率时序调度（基于 TIM3 1ms 系统 tick）
+  *   5ms   / 200Hz : JY61P 双路 Burst Read（ACC + GYRO + ANGLE）
+  *   10ms  / 100Hz : 跌倒检测 + MAX30102 FIFO 分时读取
+  *   20ms  /  50Hz : ADC Ping-Pong 快照 + Flex_Update + 痉挛检测
+  *   50ms  /  20Hz : 手势识别 + DFPlayer 触发 + 振动维护
+  *   100ms /  10Hz : 蓝牙指令消费 + SOS 告警 + MAX30102 批处理
+  *   200ms /   5Hz : 蓝牙遥测帧输出（手指/姿态/HR/SpO2/Mode）
+  * @note 防御性设计
+  *   1. Flex 采样链路使用 Ping-Pong DMA，避免读取时被后台 DMA 覆盖。
+  *   2. MAX30102 以 10ms 轮询对齐 100Hz，降低 FIFO 失步和溢出风险。
+  *   3. 心率/血氧越界判定下沉到驱动层，main 仅消费最终结果。
   ******************************************************************************
   */
 /* USER CODE END Header */
@@ -60,19 +47,19 @@
 /* USER CODE BEGIN PTD */
 
 /**
- * ★ v2.4 升级: 删除 ADC_DMA_PAUSE/RESUME 宏。
- *   改用 HAL_ADC_ConvHalfCpltCallback (前半组) 和 ConvCpltCallback (后半组)
- *   的 Ping-Pong 无锁双缓冲快照, 参见 flex_sensor.c 和 adc.c 的 USER CODE。 */
-
+ * v3.1 升级说明：柔性传感器采样改为 ADC Ping-Pong 双缓冲
+ * （HalfCplt/Cplt 中断），细节见 flex_sensor.c 与 adc.c 的 USER CODE。
+ * 旧版 ADC_DMA_PAUSE/RESUME 宏已废弃。
+ */
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-/* ── MAX30102 心率/血氧报警阈值 ── */
-#define HR_ALARM_HIGH   120U   /* 心率 > 120 bpm → 异常报警 */
-#define HR_ALARM_LOW     50U   /* 心率 <  50 bpm → 异常报警 */
-#define SPO2_ALARM_LOW   90U   /* 血氧 <  90%   → 缺氧报警 */
+/* MAX30102 生命体征告警阈值 */
+#define HR_ALARM_HIGH   120U   /* 心率 > 120 bpm -> 异常告警 */
+#define HR_ALARM_LOW     50U   /* 心率 <  50 bpm -> 异常告警 */
+#define SPO2_ALARM_LOW   90U   /* 血氧 <  90%   -> 缺氧告警 */
 
 /* USER CODE END PD */
 
@@ -83,11 +70,11 @@
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
 
-/* ── ADC DMA 循环缓冲 (每手 5 通道 × uint16_t) ── */
-volatile uint16_t adc1_buf[ADC_PINGPONG_SIZE];  /* 右手 5ch × 2 组 Ping-Pong */
-volatile uint16_t adc2_buf[ADC_PINGPONG_SIZE];  /* 左手 5ch × 2 组 */
+/* ADC DMA 循环缓冲（每只手 5 通道，Ping-Pong 双半区） */
+volatile uint16_t adc1_buf[ADC_PINGPONG_SIZE];  /* 右手 5ch x 2 half-buffer */
+volatile uint16_t adc2_buf[ADC_PINGPONG_SIZE];  /* 左手 5ch x 2 half-buffer */
 
-/* ── 时序调度时间戳 ── */
+/* 多速率调度时间戳 */
 static uint32_t t_5ms   = 0;
 static uint32_t t_10ms  = 0;
 static uint32_t t_20ms  = 0;
@@ -95,24 +82,24 @@ static uint32_t t_50ms  = 0;
 static uint32_t t_100ms = 0;
 static uint32_t t_200ms = 0;
 
-/* ── 全局 SOS 标志 (可被多个任务置位) ── */
+/* 全局 SOS 标志，可被多个任务置位 */
 static uint8_t sos_flag = 0;
 
-/* ── 全局系统 tick (TIM3 1ms 中断递增) ── */
+/* 全局系统 tick，由 TIM3 1ms 中断递增 */
 volatile uint32_t sys_tick_ms = 0;
 
-/* ── UART3 中断接收单字节缓冲 ── */
+/* UART3 中断接收单字节缓冲 */
 static volatile uint8_t uart3_rx_byte;
 
-/* ── MAX30102 初始化状态 ── */
-static uint8_t max30102_present = 0;  /* 1=传感器初始化成功 */
+/* MAX30102 初始化状态 */
+static uint8_t max30102_present = 0;  /* 1 = 设备在线且初始化成功 */
 
-/* ── 三步跌倒检测状态 (基于 JY61P 加速度) ── */
-static uint8_t  fall_state = 0;        /* 0=正常, 1=失重, 2=撞击 */
+/* 三步跌倒检测状态机（基于 JY61P 加速度） */
+static uint8_t  fall_state = 0;        /* 0=待机 1=失重 2=撞击后等待静止 */
 static uint32_t fall_t_freefall = 0;
 static uint32_t fall_t_impact = 0;
 
-/* ── JY61P 全局数据引用 (外部声明) ── */
+/* JY61P 双手姿态数据（由驱动层维护） */
 extern JY61P_Data_t JY61P_Right;
 extern JY61P_Data_t JY61P_Left;
 
@@ -155,63 +142,51 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM4_Init();
 
-  /* ── ★ 启动 TIM3 1ms 中断 (调度器时钟源) ── */
+  /* 启动 TIM3 1ms 中断，作为统一调度时钟源 */
   HAL_TIM_Base_Start_IT(&htim3);
 
   /* USER CODE BEGIN 2 */
 
-  /* ═══════════════════════════════════════════════════════════════
-   * 阶段 1: 通信层初始化
-   * ═══════════════════════════════════════════════════════════════ */
-  SoftI2C_Init();     /* 三路软 I2C 总线复位 + 空闲确认 */
-  Flex_Init();         /* 柔性传感器极值反向初始化 */
+  /* 阶段 1：基础通信与采样链路初始化 */
+  SoftI2C_Init();      /* 三路软 I2C 总线复位并确认空闲 */
+  Flex_Init();         /* 柔性传感器极值/方向初始化 */
 
-  /* ═══════════════════════════════════════════════════════════════
-   * 阶段 2: 启动 ADC DMA 循环扫描 (双 ADC 独立 DMA 流)
-   * ═══════════════════════════════════════════════════════════════ */
+  /* 阶段 2：启动 ADC DMA 循环扫描（双 ADC 独立 DMA） */
   HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc1_buf, ADC_PINGPONG_SIZE);
   HAL_ADC_Start_DMA(&hadc2, (uint32_t *)adc2_buf, ADC_PINGPONG_SIZE);
 
-  /* ═══════════════════════════════════════════════════════════════
-   * 阶段 3: JY61P 惯性传感器初始化 (零硬件改线, 直替原 MPU6050 位置)
-   * ═══════════════════════════════════════════════════════════════ */
+  /* 阶段 3：初始化双路 JY61P（已替代旧注释中的 MPU6050） */
   if (JY61P_Init(JY61P_CH_RIGHT) != 0) {
-      /* 右手 JY61P 不在线 — 检查: ①供电 3.3V? ②PC上位机已切I2C模式? */
+      /* 右手 JY61P 未就绪：检查 3.3V 供电及是否已切换到 I2C 模式 */
   }
   if (JY61P_Init(JY61P_CH_LEFT) != 0) {
-      /* 左手 JY61P 不在线 — 同上 */
+      /* 左手 JY61P 未就绪：排查项同上 */
   }
 
-  /* ═══════════════════════════════════════════════════════════════
-   * 阶段 4: 外设模块初始化
-   * ═══════════════════════════════════════════════════════════════ */
-  DFPlayer_Init();     /* DFPlayer 开机 + 默认音量 25 */
-  BT_Init();           /* 蓝牙环形缓冲 + 协议解析器初始化 */
-  Vibrator_Init();     /* TIM4 PWM 双通道启动 (占空比 = 0) */
-  Gesture_Init();      /* 手势状态机 + Jerk 滑动窗口清零 */
-  SoftUART_Init();     /* ★ v3.0 PE0 软串口 (ESP-01S MQTT) */
+  /* 阶段 4：初始化外设模块 */
+  DFPlayer_Init();     /* DFPlayer 上电，默认音量 25 */
+  BT_Init();           /* 蓝牙接收缓冲和协议解析器初始化 */
+  Vibrator_Init();     /* TIM4 PWM 双通道启动，占空比先置 0 */
+  Gesture_Init();      /* 手势状态机与 jerk 检测窗口清零 */
+  SoftUART_Init();     /* PE0 软串口，预留给 ESP-01S MQTT */
 
-  /* ═══════════════════════════════════════════════════════════════
-   * 阶段 5: MAX30102 心率血氧传感器初始化
-   * ═══════════════════════════════════════════════════════════════ */
+  /* 阶段 5：初始化 MAX30102，失败时允许系统降级运行 */
   {
       uint8_t max30102_status = MAX30102_Init();
       if (max30102_status == 0) {
           max30102_present = 1;
       } else {
           max30102_present = 0;
-          /* MAX30102 不在线 — 系统降级运行, 无心率血氧功能 */
-          /* 不阻塞主程序, 其他所有功能正常运作 */
+          /* MAX30102 不在线时，仅关闭心率/血氧功能，不阻塞其他模块 */
+          /* 当前仍处于无实物阶段，这条降级路径也方便空板联调 */
       }
   }
 
-  /* ═══════════════════════════════════════════════════════════════
-   * 阶段 6: 启动 UART 中断接收
-   * ═══════════════════════════════════════════════════════════════ */
+  /* 阶段 6：启动 UART3 单字节中断接收 */
   HAL_UART_Receive_IT(&huart3, (uint8_t *)&uart3_rx_byte, 1);
 
-  /* ── 开机确认: 播放提示音 + 短振 ── */
-  DFPlayer_Play(99);  /* 99.mp3 = "系统已启动" */
+  /* 上电提示：播放启动音并短振双手 */
+  DFPlayer_Play(99);  /* 99.mp3 = 开机提示音 */
   Vibrator_Pulse(VIB_RIGHT, 50, 80);
   Vibrator_Pulse(VIB_LEFT,  50, 80);
 
@@ -223,15 +198,7 @@ int main(void)
   {
     uint32_t now = sys_tick_ms;
 
-    /* ═══════════════════════════════════════════════════════════
-     * 任务 1:  5ms — JY61P Burst Read ACC+GYRO+ANGLE (200Hz)
-     *
-     * 每次耗时: 右 ~560μs + 左 ~560μs ≈ 1120μs @ 400kHz
-     * 占时隙比: 1120μs / 5000μs = 22.4%
-     *
-     * ★ 一次 Burst Read 即获得: 加速度(m/s²) + 角速度(°/s) + 欧拉角(°)
-     * ★ 不需互补滤波、不需零漂校准 — JY61P 内部卡尔曼已完成
-     * ═══════════════════════════════════════════════════════════ */
+    /* 任务 1：5ms / 200Hz，双路 JY61P Burst Read */
     if (now - t_5ms >= 5U) {
         t_5ms = now;
         float acc[3], gyro[3], angle[3];
@@ -239,19 +206,11 @@ int main(void)
         JY61P_Read_Data(JY61P_CH_LEFT,  acc, gyro, angle);
     }
 
-    /* ═══════════════════════════════════════════════════════════
-     * 任务 2: 10ms — 跌倒检测 + MAX30102 FIFO 分时读取 (100Hz)
-     *
-     * 跌倒: 三步判定法 (失重→撞击→静止), 基于 JY61P 加速度
-     *       数据源: JY61P_Right.acc[] / JY61P_Left.acc[] (m/s²)
-     * MAX30102: 读取 1 个 FIFO 样本 (6 字节, ~195μs @ 400kHz)
-     *           ★ 采样率 100Hz 严格对齐 10ms 轮询 — 无 FIFO 失步溢出
-     *           ★ 内部检查 FIFO_NUM_SAMPLES + 溢出标志
-     * ═══════════════════════════════════════════════════════════ */
+    /* 任务 2：10ms / 100Hz，跌倒检测 + MAX30102 FIFO 读取 */
     if (now - t_10ms >= 10U) {
         t_10ms = now;
 
-        /* ── 三步跌倒检测 (右手加速度为主) ── */
+        /* 三步跌倒检测（以右手加速度为主） */
         {
             float ax = JY61P_Right.acc[0];
             float ay = JY61P_Right.acc[1];
@@ -259,7 +218,7 @@ int main(void)
             float a_mag = sqrtf(ax*ax + ay*ay + az*az);
 
             switch (fall_state) {
-            case 0: /* 正常 → 检测失重 */
+            case 0: /* 待机 -> 监测失重 */
                 if (a_mag < 3.92f) {  /* < 0.4g */
                     if (fall_t_freefall == 0) fall_t_freefall = now;
                     if (now - fall_t_freefall > 30) fall_state = 1;
@@ -267,17 +226,17 @@ int main(void)
                     fall_t_freefall = 0;
                 }
                 break;
-            case 1: /* 失重中 → 检测撞击 */
+            case 1: /* 失重后等待撞击 */
                 if (a_mag > 29.4f) {  /* > 3g */
                     fall_t_impact = now;
                     fall_state = 2;
                 }
                 if (now - fall_t_freefall > 2000) { fall_state = 0; fall_t_freefall = 0; }
                 break;
-            case 2: /* 撞击后 → 静止确认 */
+            case 2: /* 撞击后等待静止确认 */
                 if (now - fall_t_impact > 10000) {
                     if (a_mag < 11.76f && a_mag > 7.84f) {  /* 0.8g~1.2g = 静止躺地 */
-                        sos_flag = 1;  /* 跌倒触发 SOS */
+                        sos_flag = 1;  /* 满足跌倒条件，触发 SOS */
                     }
                     fall_state = 0;
                 }
@@ -285,71 +244,41 @@ int main(void)
             }
         }
 
-        /* ── MAX30102 FIFO 分时读取 (100Hz 同频轮询) ── */
+        /* MAX30102 FIFO 分时读取（100Hz 同步轮询） */
         if (max30102_present) {
             MAX30102_ReadFIFO();
-            /* ReadFIFO 内部:
-             *   ① 读 FIFO_RD_PTR / FIFO_WR_PTR → 计算可用样本数
-             *   ② 读 OVF_COUNTER → 若溢出 > 0 则 FIFO 复位
-             *   ③ 读 6 字节 (RED+IR)
-             *   ④ 边界卡关: IR ∈ [5000, 200000] → valid=1, 否则阻断
-             *   ⑤ 有效样本入环形缓冲 → 累积 DC 均值
-             * 耗时约 195μs @ 400kHz, 占 10ms 时隙的 1.95% */
+            /* 由驱动层负责 FIFO 溢出恢复、样本有效性与时间戳维护 */
         }
     }
 
-    /* ═══════════════════════════════════════════════════════════
-     * 任务 3: 20ms — ★ ADC DMA 原子快照 + 柔性传感器更新 (50Hz)
-     *
-     * ★★★ 数据撕裂防御 (v2.3 新增) ★★★
-     *   问题: ADC DMA 循环模式在后台持续覆盖 adc_buf[0..4],
-     *         Flex_Update 非原子性地顺次读取 10 个通道,
-     *         可能在一次调用中读到半新半旧的数据。
-     *   解决: 在调用 Flex_Update 前, 同时停掉两个 ADC 的 DMA 流,
-     *         确保 adc_buf 数组在读取期间冻结不变。
-     *   代价: 丢失约 2~3 个 ADC 采样周期 (~45μs),
-     *         对 50Hz 更新率无实质影响。
-     * ═══════════════════════════════════════════════════════════ */
+    /* 任务 3：20ms / 50Hz，Flex 更新 + 手指痉挛检测 */
     if (now - t_20ms >= 20U) {
         t_20ms = now;
-
-        /* ── ★ v2.4 Ping-Pong 快照: Flex_Update 内部读取 HalfCplt/Cplt
-         *    锁定的稳定半组, 无需暂停 DMA, 零撕裂保证 ★ ── */
+        /* v2.4 起改为 Ping-Pong 快照，Flex_Update 内部读取稳定半缓冲区 */
         Flex_Update();
 
-        /* ── 手指痉挛检测 (基于 Flex_Update 更新后的历史缓冲) ── */
+        /* 基于更新后的历史缓冲进行痉挛检测 */
         for (uint8_t f = 0; f < 5; f++) {
             if (Flex_CheckSpasm(0, f) || Flex_CheckSpasm(1, f)) {
-                sos_flag = 1;  /* 手指痉挛 → 触发 SOS */
+                sos_flag = 1;  /* 检出痉挛后统一走 SOS 提示链路 */
             }
         }
     }
 
-    /* ═══════════════════════════════════════════════════════════
-     * 任务 4: 50ms — 手势识别 + 振动维护 (20Hz)
-     *
-     * Gesture_Evaluate 内部:
-     *   ① encode_fingers() — 10 指百分比 → 三态编码 (0/1/2)
-     *      ★ 含百分比 [0,100] 双限硬钳位
-     *   ② jerk_detect() — 门限微分法方向检测
-     *      ★ 含冷启动计数保护 (前 20 样本静默)
-     *      ★ 含旋转熔断 (角速度 >60°/s 时冻结)
-     *   ③ 手势状态机: WAIT_STABLE → WAIT_TRAJ → ARMED → COOLDOWN
-     *   ④ 查表匹配 → 返回 GestureResult_t
-     * ═══════════════════════════════════════════════════════════ */
+    /* 任务 4：50ms / 20Hz，手势识别 + 振动维护 */
     if (now - t_50ms >= 50U) {
         t_50ms = now;
 
-        /* ── 手势判定 ── */
+        /* 根据当前双手状态机输出一个手势结果 */
         GestureResult_t gr = Gesture_Evaluate();
         if (gr.active) {
             if (gr.is_ctrl) {
-                /* ★ 控制模式: 发 MQTT 控制指令 ★ */
+                /* 控制模式：经软串口下发 MQTT 控制消息 */
                 SoftUART_SendMQTT(ctrl_vocab[gr.ctrl_idx].topic,
                                   ctrl_vocab[gr.ctrl_idx].payload);
                 Vibrator_Pulse(VIB_RIGHT, 50, 80);
             } else {
-                /* 翻译/康复模式: 播 DFPlayer */
+                /* 翻译/康复模式：播放对应语音 */
                 if (!DFPlayer_IsBusy()) {
                     DFPlayer_Play(gr.file_index);
                 }
@@ -358,24 +287,15 @@ int main(void)
             }
         }
 
-        /* ── 振动脉冲自动关断检查 ── */
+        /* 维护振动脉冲自动关闭 */
         Vibrator_Tick();
     }
 
-    /* ═══════════════════════════════════════════════════════════
-     * 任务 5: 100ms — 蓝牙指令 + SOS 处理 + MAX30102 PPG 处理 (10Hz)
-     *
-     * MAX30102 PPG 批量处理: 此时环形缓冲已累积 ~10 个 100Hz 样本,
-     *   ppg_process() 内部:
-     *     ① DC 均值估算
-     *     ② 自适应峰值间期检测 → HR
-     *     ③ R_ratio 估算 → SpO2
-     *   ★ 若手指脱离/饱和, 内部历史已清零, HR/SpO2 归 0
-     * ═══════════════════════════════════════════════════════════ */
+    /* 任务 5：100ms / 10Hz，模式切换 + 蓝牙指令 + PPG 批处理 */
     if (now - t_100ms >= 100U) {
         t_100ms = now;
 
-        /* ── ★ v3.1 模式切换: 双手全握 3 秒 + 冻结手势 + 清空 DFPlayer ── */
+        /* 保持双手全弯 3 秒切换模式，并播放模式提示音 */
         {
             static uint8_t  mode_hold = 0;
             static uint32_t mode_start = 0;
@@ -386,10 +306,10 @@ int main(void)
                 if (!mode_hold) {
                     mode_hold = 1;
                     mode_start = now;
-                    /* ★ 冻结手势输出, 防止 Hold 期间语音寄生触发 (盲点 4) */
+                    /* Hold 期间冻结手势输出，避免误触发语音 */
                     Gesture_Freeze();
                 } else if (now - mode_start > 3000U) {
-                    /* ★ 3 秒满 → 先停 DFPlayer 清空残留, 再切模式 (盲点 4) */
+                    /* 满足 3 秒后停播当前语音并切换到下一模式 */
                     DFPlayer_Stop();
                     GestureMode_t m = Gesture_GetMode();
                     m = (GestureMode_t)(((uint8_t)m + 1U) % 3U);
@@ -401,51 +321,57 @@ int main(void)
                     mode_hold = 0;
                 }
             } else {
-                /* 松开 → 解冻, 恢复手势识别 */
+                /* 松手后解冻，恢复正常识别 */
                 if (mode_hold) Gesture_Unfreeze();
                 mode_hold = 0;
             }
         }
 
-        /* ── 蓝牙命令消费 ── */
+        /* 消费蓝牙指令 */
         uint8_t cmd = BT_GetCommand();
         switch (cmd) {
         case BT_CMD_CAL_MIN:
-            Gesture_Calibrate(0, 0);  /* 右手 MIN 标定 */
-            Gesture_Calibrate(1, 0);  /* 左手 MIN 标定 */
+            Gesture_Calibrate(0, 0);  /* 右手 MIN 校准 */
+            Gesture_Calibrate(1, 0);  /* 左手 MIN 校准 */
             break;
         case BT_CMD_CAL_MAX:
-            Gesture_Calibrate(0, 1);  /* 右手 MAX 标定 */
-            Gesture_Calibrate(1, 1);  /* 左手 MAX 标定 */
+            Gesture_Calibrate(0, 1);  /* 右手 MAX 校准 */
+            Gesture_Calibrate(1, 1);  /* 左手 MAX 校准 */
+            break;
+        case BT_CMD_SENS_1:
+            Gesture_SetSensitivity(GESTURE_SENS_HIGH);
+            break;
+        case BT_CMD_SENS_2:
+            Gesture_SetSensitivity(GESTURE_SENS_MED);
+            break;
+        case BT_CMD_SENS_3:
+            Gesture_SetSensitivity(GESTURE_SENS_LOW);
             break;
         default:
             break;
         }
 
-        /* ── MAX30102 PPG 批量处理 + 生命体征报警 ── */
+        /* MAX30102 批处理与生命体征告警 */
         if (max30102_present) {
-            MAX30102_ProcessTick();    /* 内部调 ppg_process() */
+            MAX30102_ProcessTick();
 
-            /* 读取处理后的心率血氧结果 */
             uint8_t hr   = MAX30102_GetHR();
             uint8_t spo2 = MAX30102_GetSpO2();
 
-            /* ★ 生命体征超阈值检测 ★ */
             if (hr > HR_ALARM_HIGH || (hr < HR_ALARM_LOW && hr > 0)) {
-                sos_flag = 1;  /* 心率异常 → SOS */
+                sos_flag = 1;  /* 心率异常 -> SOS */
             }
             if (spo2 < SPO2_ALARM_LOW && spo2 > 0) {
-                sos_flag = 1;  /* 血氧过低 → SOS */
+                sos_flag = 1;  /* 血氧异常 -> SOS */
             }
 
-            /* 手指脱离提示: 传感器离线 > 2 秒 → 振动提醒 */
+            /* 手指脱离提示：离线超过 2 秒时长振提醒重新佩戴 */
             {
                 static uint8_t  finger_off_ticks = 0;
                 static uint8_t  finger_off_alarmed = 0;
                 if (!MAX30102_IsOnline()) {
                     finger_off_ticks++;
                     if (finger_off_ticks > 20 && !finger_off_alarmed) {
-                        /* 连续 2 秒离线 → 长振提醒配戴 */
                         Vibrator_Pulse(VIB_RIGHT, 300, 50);
                         Vibrator_Pulse(VIB_LEFT,  300, 50);
                         finger_off_alarmed = 1;
@@ -457,18 +383,14 @@ int main(void)
             }
         }
 
-        /* ── SOS 全局触发汇总 ── */
+        /* 统一 SOS 音频触发 */
         if (sos_flag) {
-            DFPlayer_Play(30);  /* 30.mp3 = "需要帮助 / 检测到异常" */
+            DFPlayer_Play(30);  /* 30.mp3 = 紧急提示音 */
             sos_flag = 0;
         }
     }
 
-    /* ═══════════════════════════════════════════════════════════
-     * 任务 6: 200ms — 蓝牙遥测 v3.0 18 字节二进制帧 (5Hz)
-     *
-     * 帧格式: [0xAA][R5指][RL/PCH/YW×6][HR/SPO2][Mode][L5指][XOR][0xBB]
-     * ═══════════════════════════════════════════════════════════ */
+    /* 任务 6：200ms / 5Hz，蓝牙遥测帧 */
     if (now - t_200ms >= 200U) {
         t_200ms = now;
 
@@ -476,11 +398,11 @@ int main(void)
         uint8_t pos = 0;
         frame[pos++] = 0xAAU;  /* 帧头 */
 
-        /* 右手 5 指弯曲度 */
+        /* 右手 5 指弯曲百分比 */
         for (uint8_t f = 0; f < 5U; f++)
             frame[pos++] = Flex_GetPercent(0, f);
 
-        /* Roll/Pitch/Yaw (° × 100, int16 LE) */
+        /* Roll/Pitch/Yaw（乘 100，int16 小端） */
         int16_t roll  = (int16_t)(JY61P_Right.angle[0] * 100.0f);
         int16_t pitch = (int16_t)(JY61P_Right.angle[1] * 100.0f);
         int16_t yaw   = (int16_t)(JY61P_Right.angle[2] * 100.0f);
@@ -491,18 +413,18 @@ int main(void)
         frame[pos++] = (uint8_t)(yaw & 0xFF);
         frame[pos++] = (uint8_t)((yaw >> 8) & 0xFF);
 
-        /* 心率 + 血氧 */
+        /* 心率和血氧 */
         frame[pos++] = max30102_present ? MAX30102_GetHR()   : 0U;
         frame[pos++] = max30102_present ? MAX30102_GetSpO2() : 0U;
 
-        /* 工作模式 */
+        /* 当前模式 */
         frame[pos++] = (uint8_t)Gesture_GetMode();
 
-        /* 左手 5 指弯曲度 */
+        /* 左手 5 指弯曲百分比 */
         for (uint8_t f = 0; f < 5U; f++)
             frame[pos++] = Flex_GetPercent(1, f);
 
-        /* XOR 校验 (不含帧头) + 帧尾 */
+        /* XOR 校验（不含帧头和帧尾） */
         uint8_t csum = 0U;
         for (uint8_t i = 1U; i < pos; i++) csum ^= frame[i];
         frame[pos++] = csum;
@@ -519,12 +441,10 @@ int main(void)
 
 /* USER CODE BEGIN 4 */
 
-/* ═══════════════════════════════════════════════════════════════
- * TIM3 1ms 中断回调 — 维护全局系统 tick
- *
- * sys_tick_ms 是整个多速率调度器的唯一时钟源。
- * TIM3 配置: PSC=83, ARR=999 → 84MHz / 84 / 1000 = 1kHz 溢出率
- * ═══════════════════════════════════════════════════════════════ */
+/*
+ * TIM3 1ms 中断回调：维护全局系统 tick。
+ * sys_tick_ms 是整套多速率调度器唯一的时间基准。
+ */
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM3) {
@@ -532,30 +452,23 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
 }
 
-/* ═══════════════════════════════════════════════════════════════
- * USART 接收中断回调 — 蓝牙单字节非阻塞接收
- *
- * 操作顺序至关重要: 必须先 HAL_UART_Receive_IT 重新注册,
- * 再调用 BT_RxCallback 消费数据。因为 BT_RxCallback 可能
- * 调 BT_SendString 使用 USART3 发送, 若先消费后注册,
- * 发送完毕的 TXE 中断可能误触发 RX 路径。
- * ═══════════════════════════════════════════════════════════════ */
+/*
+ * USART3 接收完成回调：蓝牙单字节非阻塞接收。
+ * 先重新挂接 HAL_UART_Receive_IT，再消费字节，避免回调期间丢下一个字节。
+ */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART3) {
         uint8_t byte = uart3_rx_byte;
-        /* 先重新注册, 防止在 BT_RxCallback 中丢失下一个字节 */
         HAL_UART_Receive_IT(&huart3, (uint8_t *)&uart3_rx_byte, 1);
         BT_RxCallback(byte);
     }
 }
 
-/* ═══════════════════════════════════════════════════════════════
- * USART1 DMA 发送完成回调 — DFPlayer 非阻塞发送完成通知
- *
- * DFPlayer Mini 指令帧为 10 字节, DMA 传输完毕后硬件触发此回调。
- * DFPlayer_DMA_TxCplt 清除 dma_busy 标志, 允许下一帧发送。
- * ═══════════════════════════════════════════════════════════════ */
+/*
+ * USART1 DMA 发送完成回调：供 DFPlayer 串口 DMA 使用。
+ * 完成后由 DFPlayer_DMA_TxCplt 释放忙标志并推进待发队列。
+ */
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1) {
@@ -569,11 +482,11 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
   * @brief System Clock Configuration
   * @retval None
   *
-  * HSE 8MHz → PLLM=8 / PLLN=336 / PLLP=2
-  * SYSCLK = 8 / 8 × 336 / 2 = 168MHz
-  * APB1 = 168 / 4 = 42MHz  (TIM3 时钟 = 84MHz 因为 APB1 prescaler > 1)
-  * APB2 = 168 / 2 = 84MHz  (TIM4 时钟 = 84MHz)
-  * ADC   = 84 / 4 = 21MHz  (不可超过 36MHz, 符合手册限制)
+  * HSE 8MHz -> PLLM=8 / PLLN=336 / PLLP=2
+  * SYSCLK = 8 / 8 * 336 / 2 = 168MHz
+  * APB1 = 168 / 4 = 42MHz  （TIM3 时钟翻倍后为 84MHz）
+  * APB2 = 168 / 2 = 84MHz  （TIM4 时钟为 84MHz）
+  * ADC   = 84 / 4 = 21MHz  （低于 STM32F4 ADC 36MHz 上限）
   */
 void SystemClock_Config(void)
 {

@@ -1,3 +1,9 @@
+/*
+ * Legacy notice:
+ * This header is kept only for compatibility/reference.
+ * The active v3.1 IMU path is JY61P, not MPU6050.
+ * New code should include jy61p.h instead of this file.
+ */
 #ifndef __MPU6050_H
 #define __MPU6050_H
 

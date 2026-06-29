@@ -55,8 +55,14 @@ void BT_RxCallback(uint8_t byte)
     }
 
     /* ── 字符串模式聚合 ── */
-    str_buf[str_idx++] = (char)byte;
-    if (byte == '\n' || str_idx >= (BT_RX_BUF_SIZE - 1)) {
+    if (str_idx < (BT_RX_BUF_SIZE - 1U)) {
+        str_buf[str_idx++] = (char)byte;
+    } else {
+        str_buf[BT_RX_BUF_SIZE - 2U] = (char)byte;
+        str_idx = BT_RX_BUF_SIZE - 1U;
+    }
+
+    if (byte == '\n' || str_idx >= (BT_RX_BUF_SIZE - 1U)) {
         str_buf[str_idx] = '\0';
         str_idx = 0;
 
@@ -66,7 +72,8 @@ void BT_RxCallback(uint8_t byte)
             cmd_pending = BT_CMD_CAL_MAX;
         } else {
             /* 非标定指令，保存为自定义字符串 */
-            strncpy(last_string, str_buf, BT_RX_BUF_SIZE - 1);
+            strncpy(last_string, str_buf, BT_RX_BUF_SIZE - 1U);
+            last_string[BT_RX_BUF_SIZE - 1U] = '\0';
         }
         memset(str_buf, 0, BT_RX_BUF_SIZE);
     }
