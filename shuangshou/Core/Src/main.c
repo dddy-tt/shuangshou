@@ -50,6 +50,7 @@
 #include "vibrator.h"
 #include "gesture.h"
 #include "max30102.h"
+#include "soft_uart.h"
 #include "math.h"
 #include "stdio.h"
 #include "string.h"
@@ -153,6 +154,10 @@ int main(void)
   MX_ADC2_Init();
   MX_TIM3_Init();
   MX_TIM4_Init();
+
+  /* ── ★ 启动 TIM3 1ms 中断 (调度器时钟源) ── */
+  HAL_TIM_Base_Start_IT(&htim3);
+
   /* USER CODE BEGIN 2 */
 
   /* ═══════════════════════════════════════════════════════════════
@@ -184,6 +189,7 @@ int main(void)
   BT_Init();           /* 蓝牙环形缓冲 + 协议解析器初始化 */
   Vibrator_Init();     /* TIM4 PWM 双通道启动 (占空比 = 0) */
   Gesture_Init();      /* 手势状态机 + Jerk 滑动窗口清零 */
+  SoftUART_Init();     /* ★ v3.0 PE0 软串口 (ESP-01S MQTT) */
 
   /* ═══════════════════════════════════════════════════════════════
    * 阶段 5: MAX30102 心率血氧传感器初始化
@@ -337,13 +343,19 @@ int main(void)
         /* ── 手势判定 ── */
         GestureResult_t gr = Gesture_Evaluate();
         if (gr.active) {
-            /* 若 DFPlayer 正在播放, DMA 忙则跳过 (下一周期重试) */
-            if (!DFPlayer_IsBusy()) {
-                DFPlayer_Play(gr.file_index);
+            if (gr.is_ctrl) {
+                /* ★ 控制模式: 发 MQTT 控制指令 ★ */
+                SoftUART_SendMQTT(ctrl_vocab[gr.ctrl_idx].topic,
+                                  ctrl_vocab[gr.ctrl_idx].payload);
+                Vibrator_Pulse(VIB_RIGHT, 50, 80);
+            } else {
+                /* 翻译/康复模式: 播 DFPlayer */
+                if (!DFPlayer_IsBusy()) {
+                    DFPlayer_Play(gr.file_index);
+                }
+                Vibrator_Pulse(VIB_RIGHT, 50, 80);
+                Vibrator_Pulse(VIB_LEFT,  50, 80);
             }
-            /* 振动反馈: 双手同时短振 50ms 确认识别 */
-            Vibrator_Pulse(VIB_RIGHT, 50, 80);
-            Vibrator_Pulse(VIB_LEFT,  50, 80);
         }
 
         /* ── 振动脉冲自动关断检查 ── */
@@ -362,6 +374,29 @@ int main(void)
      * ═══════════════════════════════════════════════════════════ */
     if (now - t_100ms >= 100U) {
         t_100ms = now;
+
+        /* ── ★ v3.0 模式切换检测: 双手全握 "2222222222" 保持 3 秒 ── */
+        {
+            static uint8_t  mode_hold = 0;
+            static uint32_t mode_start = 0;
+            char cur[11];
+            Gesture_GetCurrentCode(cur);
+            cur[10] = '\0';
+            if (strcmp(cur, "2222222222") == 0) {
+                if (!mode_hold) { mode_hold = 1; mode_start = now; }
+                else if (now - mode_start > 3000U) {
+                    GestureMode_t m = Gesture_GetMode();
+                    m = (GestureMode_t)(((uint8_t)m + 1U) % 3U);
+                    Gesture_SetMode(m);
+                    if (m == MODE_TRANSLATE)      DFPlayer_Play(60);
+                    else if (m == MODE_CONTROL)   DFPlayer_Play(61);
+                    else                           DFPlayer_Play(62);
+                    mode_hold = 0;
+                }
+            } else {
+                mode_hold = 0;
+            }
+        }
 
         /* ── 蓝牙命令消费 ── */
         uint8_t cmd = BT_GetCommand();
@@ -421,38 +456,50 @@ int main(void)
     }
 
     /* ═══════════════════════════════════════════════════════════
-     * 任务 6: 200ms — 蓝牙调试遥测 (5Hz)
+     * 任务 6: 200ms — 蓝牙遥测 v3.0 18 字节二进制帧 (5Hz)
      *
-     * 上报格式: <Pitch,Roll,R0,R1,R2,R3,R4>\r\n
-     * 示例:     <-12.3,5.8,45,12,78,3,91>
-     * 数据可用于: 上位机波形显示 / 标定辅助 / 算法参数调优
+     * 帧格式: [0xAA][R5指][RL/PCH/YW×6][HR/SPO2][Mode][L5指][XOR][0xBB]
      * ═══════════════════════════════════════════════════════════ */
     if (now - t_200ms >= 200U) {
         t_200ms = now;
 
-        char dbg[96];
-        int len = snprintf(dbg, sizeof(dbg),
-                 "<R:%.1f,P:%.1f,Y:%.1f | %d,%d,%d,%d,%d>\r\n",
-                 JY61P_Right.angle[0], JY61P_Right.angle[1], JY61P_Right.angle[2],
-                 Flex_GetPercent(0, 0), Flex_GetPercent(0, 1),
-                 Flex_GetPercent(0, 2), Flex_GetPercent(0, 3),
-                 Flex_GetPercent(0, 4));
-        if (len > 0 && len < (int)sizeof(dbg)) {
-            BT_SendString(dbg);
-        }
+        uint8_t frame[20];
+        uint8_t pos = 0;
+        frame[pos++] = 0xAAU;  /* 帧头 */
 
-        /* ── 附加 MAX30102 生命体征遥测 (若传感器在线) ── */
-        if (max30102_present) {
-            uint8_t hr   = MAX30102_GetHR();
-            uint8_t spo2 = MAX30102_GetSpO2();
-            uint8_t online = MAX30102_IsOnline();
-            char vitals[32];
-            int vlen = snprintf(vitals, sizeof(vitals),
-                     "<VITALS:%d,%d,%d>\r\n", hr, spo2, online);
-            if (vlen > 0 && vlen < (int)sizeof(vitals)) {
-                BT_SendString(vitals);
-            }
-        }
+        /* 右手 5 指弯曲度 */
+        for (uint8_t f = 0; f < 5U; f++)
+            frame[pos++] = Flex_GetPercent(0, f);
+
+        /* Roll/Pitch/Yaw (° × 100, int16 LE) */
+        int16_t roll  = (int16_t)(JY61P_Right.angle[0] * 100.0f);
+        int16_t pitch = (int16_t)(JY61P_Right.angle[1] * 100.0f);
+        int16_t yaw   = (int16_t)(JY61P_Right.angle[2] * 100.0f);
+        frame[pos++] = (uint8_t)(roll & 0xFF);
+        frame[pos++] = (uint8_t)((roll >> 8) & 0xFF);
+        frame[pos++] = (uint8_t)(pitch & 0xFF);
+        frame[pos++] = (uint8_t)((pitch >> 8) & 0xFF);
+        frame[pos++] = (uint8_t)(yaw & 0xFF);
+        frame[pos++] = (uint8_t)((yaw >> 8) & 0xFF);
+
+        /* 心率 + 血氧 */
+        frame[pos++] = max30102_present ? MAX30102_GetHR()   : 0U;
+        frame[pos++] = max30102_present ? MAX30102_GetSpO2() : 0U;
+
+        /* 工作模式 */
+        frame[pos++] = (uint8_t)Gesture_GetMode();
+
+        /* 左手 5 指弯曲度 */
+        for (uint8_t f = 0; f < 5U; f++)
+            frame[pos++] = Flex_GetPercent(1, f);
+
+        /* XOR 校验 (不含帧头) + 帧尾 */
+        uint8_t csum = 0U;
+        for (uint8_t i = 1U; i < pos; i++) csum ^= frame[i];
+        frame[pos++] = csum;
+        frame[pos++] = 0xBBU;
+
+        BT_SendRaw(frame, pos);
     }
 
     /* USER CODE END WHILE */

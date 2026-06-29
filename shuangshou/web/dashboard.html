@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>📊 实时仪表盘 — 手语手套</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1923;color:#e0e0e0;min-height:100vh}
+.header{background:#1a2733;padding:12px 16px;text-align:center;border-bottom:1px solid #2a3a4a}
+.header h1{font-size:1.2em;color:#00d4ff}
+#status{text-align:center;padding:8px;font-size:0.75em;color:#8899aa;cursor:pointer}
+.grid{display:flex;flex-wrap:wrap;gap:8px;padding:8px}
+.card{background:#1a2733;border-radius:10px;padding:12px;flex:1;min-width:140px}
+.card h3{font-size:0.8em;color:#8899aa;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px}
+.fingers{display:flex;justify-content:space-around;align-items:flex-end;height:120px;gap:4px}
+.bar{flex:1;border-radius:4px 4px 0 0;transition:height 0.15s;position:relative;min-width:20px}
+.bar span{position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);font-size:0.6em;color:#8899aa}
+.vital{font-size:1.8em;font-weight:bold;text-align:center;padding:8px}
+.vital.hr{color:#ff6b6b}.vital.spo2{color:#51cf66}
+.mode-badge{display:inline-block;padding:4px 12px;border-radius:16px;font-size:0.7em;font-weight:bold;text-align:center}
+.nav{display:flex;gap:8px;padding:8px;border-top:1px solid #2a3a4a}
+.nav button{flex:1;padding:10px;border:none;border-radius:8px;font-size:0.85em;cursor:pointer;background:#1a2733;color:#8899aa}
+.nav button.active{background:#00d4ff22;color:#00d4ff}
+</style>
+</head>
+<body>
+<div class="header"><h1>📊 实时仪表盘</h1></div>
+<div id="status">🔴 未连接 — 点我连接</div>
+<div class="grid">
+  <div class="card"><h3>✋ 右手手指</h3>
+    <div class="fingers" id="rfinger"></div>
+  </div>
+  <div class="card"><h3>🤚 左手手指</h3>
+    <div class="fingers" id="lfinger"></div>
+  </div>
+</div>
+<div class="grid">
+  <div class="card"><h3>🌀 姿态角</h3>
+    <canvas id="att" width="200" height="150"></canvas>
+    <div style="text-align:center;font-size:0.75em" id="att-text">R:-- P:-- Y:--</div>
+  </div>
+  <div class="card">
+    <h3>❤️ 生命体征</h3>
+    <div class="vital hr" id="hr">--</div><div style="text-align:center;font-size:0.7em;color:#8899aa">心率 bpm</div>
+    <div class="vital spo2" id="spo2">--</div><div style="text-align:center;font-size:0.7em;color:#8899aa">血氧 %</div>
+  </div>
+</div>
+<div style="text-align:center;padding:8px">
+  <span class="mode-badge" id="mode-badge" style="background:#00d4ff22;color:#00d4ff">翻译模式</span>
+</div>
+<div class="nav">
+  <button class="active">📊 仪表盘</button>
+  <button onclick="location='control.html'">🎮 控制</button>
+  <button onclick="location='rehab.html'">🤖 AI康复</button>
+</div>
+
+<script>
+const SRV='0000ffe0-0000-1000-8000-00805f9b34fb';
+const CHR='0000ffe1-0000-1000-8000-00805f9b34fb';
+let ch=null;
+
+function mkFingers(id){
+  const p=document.getElementById(id);
+  const colors=['#ff6b6b','#ffa502','#ffd43b','#51cf66','#00d4ff'];
+  for(let i=0;i<5;i++){
+    const d=document.createElement('div');d.className='bar';
+    d.style.backgroundColor=colors[i];
+    d.style.height='5%';d.id=id+i;
+    const s=document.createElement('span');
+    s.textContent=['拇','食','中','无','小'][i];
+    d.appendChild(s);p.appendChild(d);
+  }
+}
+mkFingers('rfinger');mkFingers('lfinger');
+
+function parseFrame(v){
+  if(v.byteLength<18||v[0]!==0xAA||v[17]!==0xBB)return;
+  let c=0;for(let i=1;i<17;i++)c^=v[i];
+  if(c!==v[16])return;
+  for(let i=0;i<5;i++)document.getElementById('rfinger'+i).style.height=(v[1+i]/100*100)+'%';
+  for(let i=0;i<5;i++)document.getElementById('lfinger'+i).style.height=(v[13+i]/100*100)+'%';
+  let r=(v[6]|(v[7]<<8))/100,p=(v[8]|(v[9]<<8))/100,y=(v[10]|(v[11]<<8))/100;
+  r=r>180?r-655.36:r;p=p>180?p-655.36:p;y=y>180?y-655.36:y;
+  const ca=document.getElementById('att'),w=ca.width,h=ca.height,ctx=ca.getContext('2d');
+  ctx.clearRect(0,0,w,h);
+  const cx=w/2,cy=h/2;
+  ctx.strokeStyle='#334';ctx.lineWidth=2;
+  ctx.beginPath();ctx.ellipse(cx,cy,55,28,0,0,Math.PI*2);ctx.stroke();
+  ctx.beginPath();ctx.ellipse(cx,cy,55*Math.cos(r*Math.PI/180),28,0,0,Math.PI*2);ctx.strokeStyle='#00d4ff';ctx.stroke();
+  ctx.fillStyle='#ff6b6b';ctx.beginPath();ctx.arc(cx+p*1.2,cy-r*1.2,5,0,Math.PI*2);ctx.fill();
+  document.getElementById('att-text').textContent='R:'+r.toFixed(1)+'° P:'+p.toFixed(1)+'° Y:'+y.toFixed(1)+'°';
+  document.getElementById('hr').textContent=v[12]||'--';
+  document.getElementById('spo2').textContent=v[13]||'--';
+  const modes=['翻译模式','控制模式','康复模式'],colors=['#00d4ff22','#ffa50222','#51cf6622'],tc=['#00d4ff','#ffa502','#51cf66'];
+  const m=v[14]||0;
+  document.getElementById('mode-badge').textContent=modes[m];
+  document.getElementById('mode-badge').style.background=colors[m];
+  document.getElementById('mode-badge').style.color=tc[m];
+}
+
+async function connect(){
+  try{
+    document.getElementById('status').textContent='🟡 搜索中...';
+    const d=await navigator.bluetooth.requestDevice({filters:[{services:[SRV]}]});
+    const s=await d.gatt.connect();
+    const sv=await s.getPrimaryService(SRV);
+    ch=await sv.getCharacteristic(CHR);
+    await ch.startNotifications();
+    ch.addEventListener('characteristicvaluechanged',e=>parseFrame(new Uint8Array(e.target.value.buffer)));
+    document.getElementById('status').textContent='🟢 已连接';
+    d.addEventListener('gattserverdisconnected',()=>{document.getElementById('status').textContent='🔴 断开 — 点我重连';ch=null;});
+  }catch(e){document.getElementById('status').textContent='🔴 未连接 — 点我重试';}
+}
+document.getElementById('status').onclick=connect;
+</script>
+</body>
+</html>

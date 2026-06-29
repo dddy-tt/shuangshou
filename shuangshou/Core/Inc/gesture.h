@@ -16,10 +16,19 @@
 #define DIR_FORWARD 5
 #define DIR_BACK    6
 
+/* ── 工作模式 ── */
+typedef enum {
+    MODE_TRANSLATE = 0,  /* 翻译模式 */
+    MODE_CONTROL   = 1,  /* IoT 控制模式 */
+    MODE_REHAB     = 2,  /* AI 康复模式 */
+} GestureMode_t;
+
 /* ── 手势识别触发结果 ── */
 typedef struct {
     uint8_t active;        /* 1=有新手势 */
-    uint8_t file_index;    /* DFPlayer 文件编号 */
+    uint8_t file_index;    /* DFPlayer 文件编号 / MQTT 控制索引 */
+    uint8_t is_ctrl;       /* ★ 1=控制指令 (不播 DFPlayer, 走 MQTT) */
+    uint8_t ctrl_idx;      /* ★ 控制词表索引 */
     char    code_str[12];  /* 手势编码字符串（调试用）*/
 } GestureResult_t;
 
@@ -29,6 +38,13 @@ typedef struct {
     uint16_t mp3_file;     /* 对应 MP3 文件编号 */
     uint8_t  is_dynamic;   /* 0=静态手势, 1=动态手势 */
 } GestureEntry_t;
+
+/* ── IoT 控制条目 ── */
+typedef struct {
+    char     code[12];     /* 手势编码 */
+    char     topic[24];    /* MQTT Topic */
+    char     payload[8];   /* MQTT Payload (ON/OFF) */
+} GestureCtrl_t;
 
 /* ── API ── */
 
@@ -60,5 +76,13 @@ uint8_t Gesture_Compare(const char *target_code);
  * cal_type: 0=MIN, 1=MAX
  */
 void Gesture_Calibrate(uint8_t hand, uint8_t cal_type);
+
+/* ── v3.0 新增: 模式管理 ── */
+GestureMode_t Gesture_GetMode(void);
+void Gesture_SetMode(GestureMode_t mode);
+
+/* ── v3.0 新增: IoT 控制词表 (供 main.c 引用) ── */
+extern const GestureCtrl_t ctrl_vocab[];
+#define CTRL_VOCAB_COUNT  6U
 
 #endif /* __GESTURE_H */

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>🤖 AI 康复训练 — 手语手套</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1923;color:#e0e0e0;min-height:100vh}
+.header{background:#1a2733;padding:12px 16px;text-align:center;border-bottom:1px solid #2a3a4a}
+.header h1{font-size:1.2em;color:#51cf66}
+.card{background:#1a2733;border-radius:10px;padding:16px;margin:8px}
+.card h3{font-size:0.85em;color:#8899aa;margin-bottom:8px}
+.big{font-size:1.4em;text-align:center;padding:16px;color:#51cf66;font-weight:bold}
+.score{font-size:3em;text-align:center;font-weight:bold;padding:8px}
+.sc-g{color:#51cf66}.sc-o{color:#ffa502}.sc-b{color:#ff6b6b}
+.bar-bg{height:8px;background:#334;border-radius:4px;overflow:hidden;margin:8px 0}
+.bar-bg div{height:100%;background:#51cf66;border-radius:4px;transition:width 0.3s}
+.fng{display:flex;justify-content:space-around;align-items:flex-end;height:80px;gap:4px}
+.fng .fb{flex:1;min-width:16px;border-radius:4px 4px 0 0}
+.ai-box{background:#0f1923;border:1px solid #2a3a4a;border-radius:8px;padding:12px;font-size:0.85em;line-height:1.5;color:#51cf66;min-height:48px}
+.btn-row{display:flex;gap:8px;margin-top:12px}
+.bt{border:none;border-radius:8px;padding:10px 16px;font-size:0.9em;cursor:pointer;font-weight:bold;flex:1}
+.bt:disabled{opacity:0.3;cursor:default}
+.bt-start{background:#51cf66;color:#0f1923}
+.bt-next{background:#00d4ff;color:#0f1923}
+.bt-end{background:#ff6b6b;color:#fff}
+.bt-mic{width:56px;height:56px;border-radius:50%;border:2px solid #51cf66;background:#51cf6622;color:#51cf66;font-size:1.3em;cursor:pointer;margin:8px auto;display:block;transition:all 0.2s}
+.bt-mic.on{animation:pulse 1s infinite;background:#51cf66;color:#0f1923}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 #51cf6644}50%{box-shadow:0 0 0 16px #51cf6600}}
+.nav{display:flex;gap:8px;padding:8px;border-top:1px solid #2a3a4a}
+.nav button{flex:1;padding:10px;border:none;border-radius:8px;font-size:0.85em;cursor:pointer;background:#1a2733;color:#8899aa}
+.nav button.active{background:#51cf6622;color:#51cf66}
+</style>
+</head>
+<body>
+<div class="header"><h1>🤖 AI 康复训练</h1></div>
+
+<div class="card" id="train-card">
+  <div class="big" id="step-name">准备开始训练</div>
+  <h3>🎯 目标 vs 👆 实际</h3>
+  <div class="fng" id="target-bars"></div>
+  <div class="fng" id="actual-bars"></div>
+  <div class="bar-bg"><div id="acc-bar" style="width:0%"></div></div>
+  <div class="score sc-g" id="score-val">--</div>
+  <div class="ai-box" id="ai-box">👋 点击"开始训练"，AI 将语音引导你完成每个动作</div>
+  <button class="bt-mic" id="mic-btn" onclick="toggleMic()">🎤</button>
+  <div class="btn-row">
+    <button class="bt bt-start" id="btn-start" onclick="startTrain()">▶ 开始</button>
+    <button class="bt bt-next" id="btn-next" onclick="nextAct()" disabled>⏭ 下一个</button>
+    <button class="bt bt-end"  id="btn-end"  onclick="endTrain()" disabled>⏹ 结束</button>
+  </div>
+</div>
+
+<div class="nav">
+  <button onclick="location='dashboard.html'">📊 仪表盘</button>
+  <button onclick="location='control.html'">🎮 控制</button>
+  <button class="active">🤖 AI康复</button>
+</div>
+
+<script>
+const API_KEY='YOUR_DEEPSEEK_API_KEY';
+const SEQ=[
+  {name:'握拳',  t:[80,80,80,80,80]},
+  {name:'伸展',  t:[5,5,5,5,5]},
+  {name:'拇指弯',t:[80,5,5,5,5]},
+  {name:'OK手势',t:[80,80,5,5,5]},
+  {name:'比耶',  t:[5,80,80,5,5]},
+];
+let step=0, scores=[], active=false, finger=[0,0,0,0,0], rec=null;
+
+function mkBars(id){
+  document.getElementById(id).innerHTML='';
+  for(let i=0;i<5;i++){
+    const d=document.createElement('div');
+    d.className='fb';d.id=id+i;
+    document.getElementById(id).appendChild(d);
+  }
+}
+mkBars('target-bars');mkBars('actual-bars');
+
+function showBars(id,vals,isTarget){
+  for(let i=0;i<5;i++){
+    const el=document.getElementById(id+i);
+    el.style.height=vals[i]+'%';
+    el.style.backgroundColor=isTarget?'#ff6b6b33':'hsl('+(200-i*20)+',60%,50%)';
+  }
+}
+
+/* 模拟手指数据 — 实际使用时从 BLE characteristic 读取 */
+/* 此处提供测试接口: 在控制台调 window.setFingers([0,0,0,0,0]) */
+window.setFingers=(v)=>{for(let i=0;i<5;i++)finger[i]=v[i];if(active)calcScore();};
+
+function calcScore(){
+  const t=SEQ[step].t;let d=0;
+  for(let i=0;i<5;i++)d+=Math.abs(finger[i]-t[i]);
+  const s=Math.max(0,Math.round(100-d*100/400));
+  document.getElementById('acc-bar').style.width=s+'%';
+  const el=document.getElementById('score-val');
+  el.textContent=s+'分';
+  el.className='score '+(s>=80?'sc-g':s>=50?'sc-o':'sc-b');
+  if(s>=80)document.getElementById('btn-next').disabled=false;
+}
+
+async function callAI(msg){
+  try{
+    const r=await fetch('https://api.deepseek.com/chat/completions',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+API_KEY},
+      body:JSON.stringify({model:'deepseek-chat',messages:[
+        {role:'system',content:'你是手部康复治疗师。中文回复，不超过3句话，语气鼓励。'},
+        {role:'user',content:msg}
+      ],max_tokens:200})
+    });
+    const j=await r.json();
+    return j.choices[0].message.content;
+  }catch(e){return 'AI 暂时不在线，请检查网络和 API Key。';}
+}
+
+function speak(txt){
+  if(!window.speechSynthesis)return;
+  speechSynthesis.cancel();
+  speechSynthesis.speak(new SpeechSynthesisUtterance(txt));
+}
+
+async function startTrain(){
+  step=0;scores=[];active=true;
+  document.getElementById('btn-start').disabled=true;
+  document.getElementById('btn-end').disabled=false;
+  document.getElementById('btn-next').disabled=true;
+  const t=SEQ[0];
+  document.getElementById('step-name').textContent='🎯 '+t.name;
+  showBars('target-bars',t.t,true);
+  showBars('actual-bars',[0,0,0,0,0],false);
+  const ai=await callAI('用户刚开始训练，请简短鼓励一句。');
+  document.getElementById('ai-box').textContent=ai;
+  speak('开始训练！请做'+t.name);
+}
+
+async function nextAct(){
+  const t=SEQ[step];let d=0;
+  for(let i=0;i<5;i++)d+=Math.abs(finger[i]-t.t[i]);
+  const s=Math.max(0,Math.round(100-d*100/400));
+  scores.push(s);
+  const ai=await callAI('用户完成"'+t.name+'"手势，得分'+s+'分。目标:'+t.t+'，实际:'+finger.join(',')+'。请简短点评。');
+  document.getElementById('ai-box').textContent=ai;
+  speak(ai);
+  step++;
+  if(step>=SEQ.length){endTrain();return;}
+  const n=SEQ[step];
+  document.getElementById('step-name').textContent='🎯 '+n.name;
+  showBars('target-bars',n.t,true);
+  document.getElementById('btn-next').disabled=true;
+  document.getElementById('acc-bar').style.width='0%';
+  document.getElementById('score-val').textContent='--';
+  speak('下一个: '+n.name);
+}
+
+async function endTrain(){
+  active=false;
+  document.getElementById('btn-start').disabled=false;
+  document.getElementById('btn-end').disabled=true;
+  document.getElementById('btn-next').disabled=true;
+  const avg=Math.round(scores.reduce((a,b)=>a+b,0)/scores.length);
+  const ai=await callAI('用户完成全部'+scores.length+'个动作训练。得分:'+scores.join(',')+'，平均'+avg+'分。请给总结和明日建议。');
+  document.getElementById('ai-box').textContent=ai;
+  document.getElementById('step-name').textContent='训练结束';
+  speak('训练结束！平均'+avg+'分。'+ai);
+}
+
+async function handleVoice(txt){
+  const ai=await callAI('用户问:"'+txt+'"。当前训练进度:第'+(step+1)+'/'+SEQ.length+'个动作"'+SEQ[step].name+'"。请简短回答。');
+  document.getElementById('ai-box').textContent=ai;
+  speak(ai);
+}
+
+function toggleMic(){
+  const Sp=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!Sp){alert('请用 Chrome 浏览器');return;}
+  if(!rec){rec=new Sp();rec.lang='zh-CN';rec.continuous=false;
+    rec.onresult=e=>{
+      document.getElementById('mic-btn').classList.remove('on');
+      handleVoice(e.results[0][0].transcript);
+    };
+    rec.onerror=()=>document.getElementById('mic-btn').classList.remove('on');
+  }
+  rec.start();
+  document.getElementById('mic-btn').classList.add('on');
+}
+</script>
+</body>
+</html>

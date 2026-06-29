@@ -22,6 +22,12 @@ void BT_Init(void);
 void BT_SendString(const char *str);
 
 /*
+ * ★ v3.0: 发送原始二进制数据 (用于 18 字节遥测帧)
+ * 不经过字符串转换, 直接 DMA 发送到 USART3
+ */
+void BT_SendRaw(const uint8_t *data, uint16_t len);
+
+/*
  * 接收中断回调，由 HAL_UART_RxCpltCallback 调用
  */
 void BT_RxCallback(uint8_t byte);

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>🎮 设备控制 — 手语手套</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1923;color:#e0e0e0;min-height:100vh}
+.header{background:#1a2733;padding:12px 16px;text-align:center;border-bottom:1px solid #2a3a4a}
+.header h1{font-size:1.2em;color:#ffa502}
+.card{background:#1a2733;border-radius:10px;padding:16px;margin:8px}
+.card h3{font-size:0.85em;color:#8899aa;margin-bottom:12px}
+.row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.dev{flex:1;text-align:center;padding:12px;border-radius:8px;background:#0f1923}
+.dev .icon{font-size:2em;margin-bottom:4px}
+.dev .name{font-size:0.75em;color:#8899aa;margin-bottom:8px}
+.btn{padding:8px 16px;border:none;border-radius:6px;font-size:0.85em;cursor:pointer;font-weight:bold;margin:2px}
+.btn.on{background:#ff6b6b33;color:#ff6b6b}.btn.off{background:#334;color:#8899aa}
+.btn.on.sel{background:#ff6b6b;color:#fff}.btn.off.sel{background:#556;color:#fff}
+.nav{display:flex;gap:8px;padding:8px;border-top:1px solid #2a3a4a}
+.nav button{flex:1;padding:10px;border:none;border-radius:8px;font-size:0.85em;cursor:pointer;background:#1a2733;color:#8899aa}
+.nav button.active{background:#ffa50222;color:#ffa502}
+#mqtt-status{text-align:center;padding:8px;font-size:0.7em;color:#8899aa}
+input{flex:1;padding:8px;border:1px solid #334;border-radius:6px;background:#0f1923;color:#e0e0e0;font-size:0.85em}
+.hint{font-size:0.7em;color:#667788;margin-top:8px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="header"><h1>🎮 设备控制</h1></div>
+<div id="mqtt-status">⚫ MQTT 未配置</div>
+
+<div class="card"><h3>💡 手动控制</h3>
+  <div class="row">
+    <div class="dev"><div class="icon">💡</div><div class="name">灯</div>
+      <button class="btn on" id="btn-light-on" onclick="ctrl('light','ON')">开</button>
+      <button class="btn off sel" id="btn-light-off" onclick="ctrl('light','OFF')">关</button>
+    </div>
+    <div class="dev"><div class="icon">🌀</div><div class="name">风扇</div>
+      <button class="btn on" id="btn-fan-on" onclick="ctrl('fan','ON')">开</button>
+      <button class="btn off sel" id="btn-fan-off" onclick="ctrl('fan','OFF')">关</button>
+    </div>
+    <div class="dev"><div class="icon">🔌</div><div class="name">插座</div>
+      <button class="btn on" id="btn-socket-on" onclick="ctrl('socket','ON')">开</button>
+      <button class="btn off sel" id="btn-socket-off" onclick="ctrl('socket','OFF')">关</button>
+    </div>
+  </div>
+</div>
+
+<div class="card"><h3>⚙️ MQTT 服务器</h3>
+  <div class="row"><span style="font-size:0.75em;width:50px">服务器:</span>
+    <input id="mqtt-host" placeholder="broker.emqx.io">
+  </div>
+  <div class="row"><span style="font-size:0.75em;width:50px">端口:</span>
+    <input id="mqtt-port" placeholder="8083" type="number">
+  </div>
+  <button class="btn on" style="width:100%;margin-top:12px" onclick="saveMQTT()">💾 保存配置</button>
+</div>
+
+<div class="card"><h3>🤖 手势映射</h3>
+  <div class="hint">
+    手势编码规则: 0=伸直 1=半弯 2=全弯<br>
+    格式: L5指 + R5指 + 方向 (0~6)<br>
+    例: 00000110000 = 双手平伸, 右手拇指食指半弯, 无方向 → 控灯
+  </div>
+</div>
+
+<div class="nav">
+  <button onclick="location='dashboard.html'">📊 仪表盘</button>
+  <button class="active">🎮 控制</button>
+  <button onclick="location='rehab.html'">🤖 AI康复</button>
+</div>
+
+<script>
+const mqttHostEl=document.getElementById('mqtt-host');
+const mqttPortEl=document.getElementById('mqtt-port');
+
+function loadMQTT(){
+  const h=localStorage.getItem('mqtt_host')||'broker.emqx.io';
+  const p=localStorage.getItem('mqtt_port')||'8083';
+  mqttHostEl.value=h;mqttPortEl.value=p;
+  document.getElementById('mqtt-status').textContent='🟢 MQTT: '+h+':'+p;
+}
+loadMQTT();
+
+function saveMQTT(){
+  localStorage.setItem('mqtt_host',mqttHostEl.value);
+  localStorage.setItem('mqtt_port',mqttPortEl.value);
+  document.getElementById('mqtt-status').textContent='🟢 已保存: '+mqttHostEl.value+':'+mqttPortEl.value;
+}
+
+function ctrl(dev,state){
+  const host=mqttHostEl.value,port=mqttPortEl.value;
+  const topic='glove/'+dev;
+  console.log('MQTT PUB:',topic,state,'→',host+':'+port);
+  fetch('https://'+host+':'+port+'/mqtt',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({topic:topic,payload:state})})
+    .then(()=>{
+      document.querySelectorAll('[id^=btn-'+dev+'-]').forEach(b=>b.classList.remove('sel'));
+      document.getElementById('btn-'+dev+'-'+(state==='ON'?'on':'off')).classList.add('sel');
+    }).catch(()=>alert('MQTT 发送失败，检查服务器配置'));
+}
+</script>
+</body>
+</html>

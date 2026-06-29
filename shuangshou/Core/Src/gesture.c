@@ -113,6 +113,20 @@ static const GestureEntry_t vocab[] = {
 };
 #define VOCAB_SIZE  (sizeof(vocab) / sizeof(vocab[0]))
 
+/* ── ★ v3.0 IoT 控制词表 ── */
+const GestureCtrl_t ctrl_vocab[] = {
+    {"00000110000", "glove/light",  "ON"},
+    {"00000110001", "glove/light",  "OFF"},
+    {"00000220000", "glove/fan",    "ON"},
+    {"00000220001", "glove/fan",    "OFF"},
+    {"00000120000", "glove/socket", "ON"},
+    {"00000120001", "glove/socket", "OFF"},
+};
+#define CTRL_VOCAB_SIZE  (sizeof(ctrl_vocab) / sizeof(ctrl_vocab[0]))
+
+/* ── ★ v3.0 工作模式 ── */
+static GestureMode_t g_mode = MODE_TRANSLATE;
+
 /* ═══════════════════════════════════════════════════════════════════════════
  *  手指编码 (保留)
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -366,10 +380,20 @@ GestureResult_t Gesture_Evaluate(void)
                  cur_code,
                  (dir == DIR_NONE) ? '0' : (char)('0' + dir));
 
-        /* ── 查表更新 ── */
+        /* ── 查表更新 (翻译词库 + 控制词表) ── */
         uint16_t file_tmp = 0;
-        if (lookup_vocab(latch_code, &file_tmp)) {
-            /* 命中! 更新锁存窗内的最佳结果 */
+        if (g_mode == MODE_CONTROL) {
+            /* ★ 控制模式: 查 IoT 控制表 */
+            for (uint16_t i = 0; i < CTRL_VOCAB_SIZE; i++) {
+                if (strcmp(latch_code, ctrl_vocab[i].code) == 0) {
+                    latch_has_match = 1;
+                    latch_best_file = (uint8_t)i;  /* 存控制词表索引 */
+                    strcpy(latch_best_code, latch_code);
+                    break;
+                }
+            }
+        } else if (lookup_vocab(latch_code, &file_tmp)) {
+            /* 翻译/康复模式: 查手势词库 */
             if (strcmp(latch_code, latch_best_code) != 0) {
                 strcpy(latch_best_code, latch_code);
                 latch_best_file = (uint8_t)file_tmp;
@@ -383,6 +407,8 @@ GestureResult_t Gesture_Evaluate(void)
             if (latch_has_match) {
                 res.active     = 1;
                 res.file_index = latch_best_file;
+                res.is_ctrl    = (g_mode == MODE_CONTROL) ? 1 : 0;
+                res.ctrl_idx   = (g_mode == MODE_CONTROL) ? latch_best_file : 0;
                 strncpy(res.code_str, latch_best_code, 11);
                 res.code_str[11] = '\0';
                 strcpy(last_triggered, latch_best_code);
@@ -426,6 +452,9 @@ uint8_t Gesture_Compare(const char *target_code)
         if (cur[i] != target_code[i]) errors |= (uint8_t)(1U << i);
     return errors;
 }
+
+GestureMode_t Gesture_GetMode(void) { return g_mode; }
+void Gesture_SetMode(GestureMode_t mode) { g_mode = mode; }
 
 void Gesture_Calibrate(uint8_t hand, uint8_t cal_type)
 {

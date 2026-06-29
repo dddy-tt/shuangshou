@@ -33,6 +33,12 @@ void BT_SendString(const char *str)
     HAL_UART_Transmit(&huart3, (uint8_t *)str, strlen(str), 100);
 }
 
+void BT_SendRaw(const uint8_t *data, uint16_t len)
+{
+    if (!data || len == 0U) return;
+    HAL_UART_Transmit(&huart3, (uint8_t *)data, len, 100);
+}
+
 /* ── 接收中断回调 ── */
 void BT_RxCallback(uint8_t byte)
 {
