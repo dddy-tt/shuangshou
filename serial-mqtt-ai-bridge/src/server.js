@@ -46,6 +46,13 @@ let mockTimer = null;
 let serialInputHandle = null;
 let shuttingDown = false;
 
+function stopMockSource() {
+  if (mockTimer) {
+    clearInterval(mockTimer);
+    mockTimer = null;
+  }
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -284,6 +291,7 @@ function buildMockGestureFrame(message) {
 }
 
 function startMockSource() {
+  stopMockSource();
   console.log("[bridge] input source=mock");
   updateTask("serial_input_task", {
     state: TASK_STATES.BLOCKED,
@@ -309,14 +317,8 @@ function startMockSource() {
   }, 3000);
 }
 
-function fallbackToReplayOrMock(reason) {
+function fallbackToMock(reason) {
   console.warn(`[bridge] serial fallback: ${reason}`);
-
-  if (useReplay) {
-    void startReplaySource();
-    return;
-  }
-
   startMockSource();
 }
 
@@ -381,7 +383,7 @@ async function startSerialSource() {
         error: error.message
       }
     });
-    fallbackToReplayOrMock(error.message);
+    fallbackToMock(error.message);
   }
 }
 
@@ -403,15 +405,37 @@ async function startReplaySource() {
     }
   });
   console.log(`[bridge] replay finished, frames=${replayedCount}`);
+
+  if (!shuttingDown) {
+    startMockSource();
+  }
+}
+
+function resolveInputSource() {
+  if (mode === "mock" || mode === "deepseek") {
+    return "mock";
+  }
+
+  if (mode === "replay" || useReplay) {
+    return "replay";
+  }
+
+  if (mode === "serial") {
+    return "serial";
+  }
+
+  return "mock";
 }
 
 function startInputSource() {
-  if (mode === "serial") {
+  const inputSource = resolveInputSource();
+
+  if (inputSource === "serial") {
     void startSerialSource();
     return;
   }
 
-  if (useReplay) {
+  if (inputSource === "replay") {
     void startReplaySource();
     return;
   }
@@ -432,9 +456,7 @@ server.listen(port, () => {
 function shutdown() {
   shuttingDown = true;
 
-  if (mockTimer) {
-    clearInterval(mockTimer);
-  }
+  stopMockSource();
 
   const closeSerial = serialInputHandle?.close ? serialInputHandle.close() : Promise.resolve();
 
