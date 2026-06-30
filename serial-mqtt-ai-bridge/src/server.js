@@ -68,6 +68,56 @@ wss.on("connection", (socket) => {
       timestamp: Date.now()
     })
   );
+
+  socket.on("message", async (rawMessage) => {
+    let payload;
+
+    try {
+      payload = JSON.parse(rawMessage.toString());
+    } catch {
+      socket.send(
+        JSON.stringify({
+          type: "system",
+          message: "invalid websocket json payload",
+          timestamp: Date.now()
+        })
+      );
+      return;
+    }
+
+    if (payload?.type === "gesture") {
+      const result = await generateAiFeedback(payload.data || {});
+
+      socket.send(
+        JSON.stringify({
+          type: "ai_feedback",
+          source: result.source,
+          result: result.feedback,
+          timestamp: Date.now()
+        })
+      );
+      return;
+    }
+
+    if (payload?.type === "command") {
+      socket.send(
+        JSON.stringify({
+          type: "system",
+          message: "command message received, handler reserved",
+          timestamp: Date.now()
+        })
+      );
+      return;
+    }
+
+    socket.send(
+      JSON.stringify({
+        type: "system",
+        message: "unsupported websocket message type",
+        timestamp: Date.now()
+      })
+    );
+  });
 });
 
 const timer = setInterval(() => {
