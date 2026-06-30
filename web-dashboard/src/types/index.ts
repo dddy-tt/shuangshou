@@ -10,13 +10,45 @@ export type DashboardTab = "translation" | "rehab" | "care" | "iot";
 
 export type SignGestureType = "HELP" | "DRINK" | "PAIN";
 
-export interface WSMessage {
+export type BridgeStatus = "connecting" | "online" | "offline";
+
+export type AiFeedbackSource = "bridge" | "mock";
+
+export interface GestureMessage {
   type: "gesture";
   gesture: GestureType;
   confidence: number;
   holdMs: number;
   timestamp: number;
 }
+
+export interface SignMessage {
+  type: "sign";
+  gesture: SignGestureType;
+  translation: string;
+  confidence: number;
+  voicePlayed: boolean;
+  timestamp: number;
+}
+
+export interface CareMessage {
+  type: "care";
+  hr: number;
+  spo2: number;
+  fall: boolean;
+  sos: boolean;
+  tip: string;
+  timestamp: number;
+}
+
+export interface SystemMessage {
+  type: "system";
+  message: string;
+  timestamp: number;
+}
+
+export type BridgeMessage = GestureMessage | SignMessage | CareMessage | SystemMessage;
+export type WSMessage = GestureMessage;
 
 export interface TrainingRecord {
   id: string;

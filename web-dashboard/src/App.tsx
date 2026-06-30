@@ -11,6 +11,7 @@ import { TaskCard } from "./components/TaskCard";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { fetchAiFeedback } from "./services/aiService";
 import {
+  AiFeedbackSource,
   CareMonitoringState,
   DashboardTab,
   GestureType,
@@ -18,7 +19,8 @@ import {
   SignGestureType,
   SignTranslationRecord,
   TrainingRecord,
-  TrainingStats
+  TrainingStats,
+  WSMessage
 } from "./types";
 
 const signGestureOrder: SignGestureType[] = ["HELP", "DRINK", "PAIN"];
@@ -37,30 +39,48 @@ const tabLabelMap: Record<DashboardTab, string> = {
 };
 
 function App() {
-  const { isConnected, lastMessage, simulateWebSocketMessage } = useWebSocket();
+  const {
+    bridgeStatus,
+    lastCareMessage,
+    lastGestureMessage,
+    lastSignMessage,
+    lastSystemMessage,
+    simulateWebSocketMessage
+  } = useWebSocket();
   const [activeTab, setActiveTab] = useState<DashboardTab>("translation");
   const [targetGesture, setTargetGesture] = useState<GestureType>("RIGHT_OPEN");
   const [aiFeedback, setAiFeedback] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiSource, setAiSource] = useState<AiFeedbackSource>("mock");
   const [stats, setStats] = useState<TrainingStats>({ total: 0, correct: 0, streak: 0, history: [] });
+  const [trainingResult, setTrainingResult] = useState<WSMessage | null>(null);
+  const [waitingBridgeGesture, setWaitingBridgeGesture] = useState(false);
   const [translationRecords, setTranslationRecords] = useState<SignTranslationRecord[]>(() => [createSignRecord(0)]);
   const [careIndex, setCareIndex] = useState(0);
+  const [careState, setCareState] = useState<CareMonitoringState>(careScenarios[0]);
+
+  const bridgeOnline = bridgeStatus === "online";
 
   useEffect(() => {
-    if (!lastMessage) {
+    if (!lastGestureMessage) {
       return;
     }
 
-    const isCorrect = lastMessage.gesture === targetGesture;
+    if (bridgeOnline && !waitingBridgeGesture) {
+      return;
+    }
+
+    const isCorrect = lastGestureMessage.gesture === targetGesture;
+    setTrainingResult(lastGestureMessage);
 
     setStats((previous) => {
       const newRecord: TrainingRecord = {
-        id: `${lastMessage.timestamp}`,
+        id: `${lastGestureMessage.timestamp}`,
         target: targetGesture,
-        actual: lastMessage.gesture,
+        actual: lastGestureMessage.gesture,
         isCorrect,
-        confidence: lastMessage.confidence,
-        time: new Date(lastMessage.timestamp).toLocaleTimeString("zh-CN", {
+        confidence: lastGestureMessage.confidence,
+        time: new Date(lastGestureMessage.timestamp).toLocaleTimeString("zh-CN", {
           hour12: false,
           hour: "2-digit",
           minute: "2-digit",
@@ -79,32 +99,111 @@ function App() {
     setIsAiLoading(true);
     fetchAiFeedback({
       targetGesture,
-      actualGesture: lastMessage.gesture,
+      actualGesture: lastGestureMessage.gesture,
       isCorrect,
-      confidence: lastMessage.confidence
-    }).then((feedback) => {
-      setAiFeedback(feedback);
+      confidence: lastGestureMessage.confidence
+    }).then((result) => {
+      setAiFeedback(result.feedback);
+      setAiSource(result.source);
       setIsAiLoading(false);
     });
-  }, [lastMessage, targetGesture]);
+
+    setWaitingBridgeGesture(false);
+  }, [bridgeOnline, lastGestureMessage, targetGesture, waitingBridgeGesture]);
 
   useEffect(() => {
+    if (bridgeOnline) {
+      return;
+    }
+
     const timer = window.setInterval(() => {
       setCareIndex((previous) => (previous + 1) % careScenarios.length);
     }, 4500);
 
     return () => window.clearInterval(timer);
-  }, []);
+  }, [bridgeOnline]);
+
+  useEffect(() => {
+    if (!bridgeOnline) {
+      setCareState(careScenarios[careIndex]);
+    }
+  }, [bridgeOnline, careIndex]);
+
+  useEffect(() => {
+    if (!lastSignMessage) {
+      return;
+    }
+
+    setTranslationRecords((previous) => {
+      const nextRecord: SignTranslationRecord = {
+        id: `${lastSignMessage.timestamp}`,
+        gesture: lastSignMessage.gesture,
+        text: lastSignMessage.translation,
+        confidence: lastSignMessage.confidence,
+        voiceStatus: lastSignMessage.voicePlayed ? "已播报" : "待播报",
+        time: new Date(lastSignMessage.timestamp).toLocaleTimeString("zh-CN", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        })
+      };
+
+      return [nextRecord, ...previous].slice(0, 8);
+    });
+  }, [lastSignMessage]);
+
+  useEffect(() => {
+    if (!lastCareMessage) {
+      return;
+    }
+
+    setCareState({
+      hr: lastCareMessage.hr,
+      spo2: lastCareMessage.spo2,
+      fallDetected: lastCareMessage.fall,
+      sosActive: lastCareMessage.sos,
+      reminder: lastCareMessage.tip
+    });
+  }, [lastCareMessage]);
+
+  useEffect(() => {
+    if (!bridgeOnline) {
+      setWaitingBridgeGesture(false);
+    }
+  }, [bridgeOnline]);
 
   const currentTranslation = translationRecords[0];
-  const currentCare = careScenarios[careIndex];
+  const currentCare = careState;
 
   const handleSimulateTranslation = () => {
+    if (bridgeOnline) {
+      return;
+    }
+
     setTranslationRecords((previous) => {
       const nextRecord = createSignRecord(previous.length);
       return [nextRecord, ...previous].slice(0, 8);
     });
   };
+
+  const handleStartTraining = () => {
+    if (bridgeOnline) {
+      setWaitingBridgeGesture(true);
+      return;
+    }
+
+    simulateWebSocketMessage(targetGesture);
+  };
+
+  const modeValue =
+    bridgeStatus === "online"
+      ? "Bridge 在线"
+      : bridgeStatus === "connecting"
+        ? "尝试连接 Bridge"
+        : "Bridge 离线 / Mock";
+  const aiValue = aiSource === "bridge" ? "AI 接口在线" : "AI 本地回退";
+  const bridgeNote = lastSystemMessage?.message || "Bridge 不在线时会自动回退前端 Mock。";
 
   const moduleContent = useMemo(() => {
     if (activeTab === "translation") {
@@ -125,7 +224,7 @@ function App() {
       return (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
           <IotCard />
-          <StatusCard wsConnected={isConnected} />
+          <StatusCard bridgeStatus={bridgeStatus} aiSource={aiSource} lastSystemMessage={bridgeNote} />
         </div>
       );
     }
@@ -133,13 +232,13 @@ function App() {
     return (
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <div className="space-y-6">
-          <TaskCard target={targetGesture} setTarget={setTargetGesture} onStart={() => simulateWebSocketMessage(targetGesture)} />
-          <ResultCard data={lastMessage} isCorrect={lastMessage?.gesture === targetGesture} />
+          <TaskCard target={targetGesture} setTarget={setTargetGesture} onStart={handleStartTraining} />
+          <ResultCard data={trainingResult} isCorrect={trainingResult?.gesture === targetGesture} />
         </div>
 
         <div className="space-y-6">
-          <StatusCard wsConnected={isConnected} />
-          <FeedbackCard feedback={aiFeedback} isLoading={isAiLoading} />
+          <StatusCard bridgeStatus={bridgeStatus} aiSource={aiSource} lastSystemMessage={bridgeNote} />
+          <FeedbackCard feedback={aiFeedback} isLoading={isAiLoading} source={aiSource} />
         </div>
 
         <div className="xl:col-span-2">
@@ -147,7 +246,7 @@ function App() {
         </div>
       </div>
     );
-  }, [activeTab, aiFeedback, currentCare, currentTranslation, isAiLoading, isConnected, lastMessage, simulateWebSocketMessage, stats, targetGesture, translationRecords]);
+  }, [activeTab, aiFeedback, aiSource, bridgeNote, bridgeStatus, currentCare, currentTranslation, isAiLoading, stats, targetGesture, trainingResult, translationRecords]);
 
   return (
     <div className="dashboard-shell">
@@ -164,15 +263,15 @@ function App() {
                 双手智能手语交互手套系统
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">
-                将手语翻译、AI 康复训练、护理监测和家电远控整合到同一套前端 Mock 看板中，
-                用于后续串口、MQTT 和 AI 服务接入前的联调预演。
+                将手语翻译、AI 康复训练、护理监测和家电远控整合到同一套前端看板中，
+                可优先接入本地 bridge，也可在 bridge 不在线时自动回退前端 Mock。
               </p>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <TopStatusCard title="模式" value="无硬件 Mock" />
+              <TopStatusCard title="模式" value={modeValue} />
               <TopStatusCard title="端口" value="localhost:3000" />
-              <TopStatusCard title="状态" value="前端演示就绪" />
+              <TopStatusCard title="状态" value={aiValue} />
             </div>
           </div>
         </header>

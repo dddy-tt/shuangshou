@@ -1,9 +1,12 @@
 ﻿import { Activity, Cpu, Radio, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import React from "react";
+import { AiFeedbackSource, BridgeStatus } from "../types";
 
 interface Props {
-  wsConnected: boolean;
+  bridgeStatus: BridgeStatus;
+  aiSource: AiFeedbackSource;
+  lastSystemMessage?: string;
 }
 
 interface StatusItemProps {
@@ -27,27 +30,52 @@ const StatusItem: React.FC<StatusItemProps> = ({ icon: Icon, label, active, help
       </div>
       <div className="flex items-center gap-2">
         <span className={`h-2.5 w-2.5 rounded-full ${active ? "bg-emerald-400 animate-pulse" : "bg-rose-400"}`} />
-        <span className="text-xs font-bold text-slate-300">{active ? "在线" : "离线"}</span>
+        <span className="text-xs font-bold text-slate-300">{active ? "在线" : "回退"}</span>
       </div>
     </div>
   </div>
 );
 
-export const StatusCard: React.FC<Props> = ({ wsConnected }) => (
-  <section className="panel">
-    <h2 className="panel-title">
-      <Activity className="text-sky-300" size={22} />
-      系统状态
-    </h2>
+export const StatusCard: React.FC<Props> = ({ bridgeStatus, aiSource, lastSystemMessage }) => {
+  const bridgeOnline = bridgeStatus === "online";
 
-    <div className="mt-5 space-y-3">
-      <StatusItem icon={Cpu} label="手套数据链路" active={wsConnected} helper="纯前端 Mock 连接状态" />
-      <StatusItem icon={Radio} label="串口 / MQTT 桥接预留" active={true} helper="当前仅做前端预演，不接真实链路" />
-      <StatusItem icon={Sparkles} label="AI 反馈引擎" active={true} helper="本地模拟反馈逻辑已启用" />
-    </div>
+  return (
+    <section className="panel">
+      <h2 className="panel-title">
+        <Activity className="text-sky-300" size={22} />
+        系统状态
+      </h2>
 
-    <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
-      当前版本：无硬件 Mock 演示版
-    </div>
-  </section>
-);
+      <div className="mt-5 space-y-3">
+        <StatusItem
+          icon={Cpu}
+          label="Bridge WebSocket"
+          active={bridgeOnline}
+          helper={
+            bridgeOnline
+              ? "Bridge 在线，正在接收 gesture / sign / care 数据"
+              : bridgeStatus === "connecting"
+                ? "正在尝试连接 ws://localhost:8765"
+                : "Bridge 离线，已回退到前端 Mock"
+          }
+        />
+        <StatusItem
+          icon={Radio}
+          label="前端 Mock 回退"
+          active={!bridgeOnline}
+          helper={bridgeOnline ? "当前由 bridge 数据驱动页面刷新" : "Bridge 不在线时训练、翻译、护理模块继续可用"}
+        />
+        <StatusItem
+          icon={Sparkles}
+          label="AI 反馈接口"
+          active={aiSource === "bridge"}
+          helper={aiSource === "bridge" ? "当前优先使用 bridge /api/ai-feedback" : "bridge 请求失败时已回退本地模拟反馈"}
+        />
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
+        {lastSystemMessage || "当前版本支持 bridge 优先接入，bridge 不在线时自动回退 Mock。"}
+      </div>
+    </section>
+  );
+};
