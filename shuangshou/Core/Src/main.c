@@ -122,6 +122,8 @@ void SystemClock_Config(void);
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+  uint8_t jy_right_ret;
+  uint8_t jy_left_ret;
   /* USER CODE END 1 */
 
   /* MCU Configuration--------------------------------------------------------*/
@@ -158,17 +160,19 @@ int main(void)
   HAL_ADC_Start_DMA(&hadc2, (uint32_t *)adc2_buf, ADC_PINGPONG_SIZE);
 
   /* 阶段 3：初始化双路 JY61P（已替代旧注释中的 MPU6050） */
-  if (JY61P_Init(JY61P_CH_RIGHT) != 0) {
-      BringupDiag_SetJYRight(0);
+  jy_right_ret = JY61P_Init(JY61P_CH_RIGHT);
+  if (jy_right_ret != 0U) {
+      BringupDiag_SetJYRightResult(0, jy_right_ret);
       /* 右手 JY61P 未就绪：检查 3.3V 供电及是否已切换到 I2C 模式 */
   } else {
-      BringupDiag_SetJYRight(1);
+      BringupDiag_SetJYRightResult(1, jy_right_ret);
   }
-  if (JY61P_Init(JY61P_CH_LEFT) != 0) {
-      BringupDiag_SetJYLeft(0);
+  jy_left_ret = JY61P_Init(JY61P_CH_LEFT);
+  if (jy_left_ret != 0U) {
+      BringupDiag_SetJYLeftResult(0, jy_left_ret);
       /* 左手 JY61P 未就绪：排查项同上 */
   } else {
-      BringupDiag_SetJYLeft(1);
+      BringupDiag_SetJYLeftResult(1, jy_left_ret);
   }
 
   /* 阶段 4：初始化外设模块 */

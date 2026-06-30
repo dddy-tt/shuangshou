@@ -4,7 +4,7 @@
 #include "string.h"
 
 static BringupDiag_State_t g_bringup_diag;
-static char g_bringup_line[80];
+static char g_bringup_line[112];
 
 void BringupDiag_Init(void)
 {
@@ -12,14 +12,16 @@ void BringupDiag_Init(void)
     memset(g_bringup_line, 0, sizeof(g_bringup_line));
 }
 
-void BringupDiag_SetJYRight(uint8_t ok)
+void BringupDiag_SetJYRightResult(uint8_t ok, uint8_t ret)
 {
     g_bringup_diag.jy_right_ok = ok ? 1U : 0U;
+    g_bringup_diag.jy_right_ret = ret;
 }
 
-void BringupDiag_SetJYLeft(uint8_t ok)
+void BringupDiag_SetJYLeftResult(uint8_t ok, uint8_t ret)
 {
     g_bringup_diag.jy_left_ok = ok ? 1U : 0U;
+    g_bringup_diag.jy_left_ret = ret;
 }
 
 void BringupDiag_SetMAX30102(uint8_t ok)
@@ -59,9 +61,11 @@ uint8_t BringupDiag_TrySend(UART_HandleTypeDef *huart)
     }
 
     len = snprintf(g_bringup_line, sizeof(g_bringup_line),
-                   "BRINGUP: JY_R=%u,JY_L=%u,MAX=%u,ADC1=%u,ADC2=%u,DEG=%u\r\n",
+                   "BRINGUP: JY_R=%u,JY_L=%u,JY_R_RET=%u,JY_L_RET=%u,MAX=%u,ADC1=%u,ADC2=%u,DEG=%u\r\n",
                    g_bringup_diag.jy_right_ok,
                    g_bringup_diag.jy_left_ok,
+                   g_bringup_diag.jy_right_ret,
+                   g_bringup_diag.jy_left_ret,
                    g_bringup_diag.max_ok,
                    g_bringup_diag.adc1_seen,
                    g_bringup_diag.adc2_seen,
