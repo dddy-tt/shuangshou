@@ -68,8 +68,8 @@ export const StatusCard: React.FC<Props> = ({ bridgeStatus, aiSource, lastSystem
         <StatusItem
           icon={Sparkles}
           label="AI 反馈接口"
-          active={aiSource === "bridge"}
-          helper={aiSource === "bridge" ? "当前优先使用 bridge /api/ai-feedback" : "bridge 请求失败时已回退本地模拟反馈"}
+          active={aiSource === "deepseek"}
+          helper={aiSource === "deepseek" ? "当前优先使用 DeepSeek 反馈结果" : "bridge 请求失败或返回 mock 时已回退本地模拟反馈"}
         />
       </div>
 

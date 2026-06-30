@@ -50,14 +50,14 @@ export const fetchAiFeedback = async (data: AiFeedbackRequest): Promise<AiFeedba
       throw new Error("bridge ai feedback request failed");
     }
 
-    const result = (await response.json()) as { feedback?: string };
+    const result = (await response.json()) as { feedback?: string; source?: AiFeedbackSource | string };
     if (!result.feedback) {
       throw new Error("bridge ai feedback payload invalid");
     }
 
     return {
       feedback: result.feedback,
-      source: "bridge"
+      source: result.source === "deepseek" ? "deepseek" : "mock"
     };
   } catch {
     return new Promise((resolve) => {

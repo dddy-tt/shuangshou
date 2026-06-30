@@ -16,7 +16,7 @@ export const FeedbackCard: React.FC<Props> = ({ feedback, isLoading, source }) =
         AI 康复训练辅助反馈
       </h2>
       <span className="rounded-full border border-fuchsia-300/20 bg-fuchsia-300/10 px-3 py-1 text-xs font-bold text-fuchsia-100">
-        {source === "bridge" ? "Bridge API" : "本地回退"}
+        {source === "deepseek" ? "DeepSeek 在线" : "本地回退"}
       </span>
     </div>
 

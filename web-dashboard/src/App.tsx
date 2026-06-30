@@ -202,7 +202,7 @@ function App() {
       : bridgeStatus === "connecting"
         ? "尝试连接 Bridge"
         : "Bridge 离线 / Mock";
-  const aiValue = aiSource === "bridge" ? "AI 接口在线" : "AI 本地回退";
+  const aiValue = aiSource === "deepseek" ? "DeepSeek 在线" : "AI 本地回退";
   const bridgeNote = lastSystemMessage?.message || "Bridge 不在线时会自动回退前端 Mock。";
 
   const moduleContent = useMemo(() => {

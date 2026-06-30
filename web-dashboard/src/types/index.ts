@@ -12,7 +12,7 @@ export type SignGestureType = "HELP" | "DRINK" | "PAIN";
 
 export type BridgeStatus = "connecting" | "online" | "offline";
 
-export type AiFeedbackSource = "bridge" | "mock";
+export type AiFeedbackSource = "deepseek" | "mock";
 
 export interface GestureMessage {
   type: "gesture";
