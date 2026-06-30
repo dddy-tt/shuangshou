@@ -47,7 +47,14 @@ export interface SystemMessage {
   timestamp: number;
 }
 
-export type BridgeMessage = GestureMessage | SignMessage | CareMessage | SystemMessage;
+export interface AiFeedbackMessage {
+  type: "ai_feedback";
+  source: AiFeedbackSource;
+  result: string;
+  timestamp: number;
+}
+
+export type BridgeMessage = GestureMessage | SignMessage | CareMessage | SystemMessage | AiFeedbackMessage;
 export type WSMessage = GestureMessage;
 
 export interface TrainingRecord {

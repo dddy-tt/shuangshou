@@ -9,11 +9,11 @@ import { StatsCard } from "./components/StatsCard";
 import { StatusCard } from "./components/StatusCard";
 import { TaskCard } from "./components/TaskCard";
 import { useWebSocket } from "./hooks/useWebSocket";
-import { fetchAiFeedback } from "./services/aiService";
 import {
   AiFeedbackSource,
   CareMonitoringState,
   DashboardTab,
+  GESTURE_MAP,
   GestureType,
   SIGN_TRANSLATION_MAP,
   SignGestureType,
@@ -41,11 +41,13 @@ const tabLabelMap: Record<DashboardTab, string> = {
 function App() {
   const {
     bridgeStatus,
+    lastAiFeedbackMessage,
     lastCareMessage,
     lastGestureMessage,
     lastSignMessage,
     lastSystemMessage,
-    simulateWebSocketMessage
+    simulateWebSocketMessage,
+    sendBridgeMessage
   } = useWebSocket();
   const [activeTab, setActiveTab] = useState<DashboardTab>("translation");
   const [targetGesture, setTargetGesture] = useState<GestureType>("RIGHT_OPEN");
@@ -96,20 +98,53 @@ function App() {
       };
     });
 
-    setIsAiLoading(true);
-    fetchAiFeedback({
-      targetGesture,
-      actualGesture: lastGestureMessage.gesture,
-      isCorrect,
-      confidence: lastGestureMessage.confidence
-    }).then((result) => {
-      setAiFeedback(result.feedback);
-      setAiSource(result.source);
+    if (bridgeOnline) {
+      setIsAiLoading(true);
+      const sent = sendBridgeMessage({
+        type: "gesture",
+        data: {
+          targetGesture,
+          actualGesture: lastGestureMessage.gesture,
+          isCorrect,
+          confidence: lastGestureMessage.confidence,
+          holdMs: lastGestureMessage.holdMs,
+          userLevel: "beginner"
+        }
+      });
+
+      if (!sent) {
+        setAiFeedback(buildLocalAiFeedback({
+          targetGesture,
+          actualGesture: lastGestureMessage.gesture,
+          isCorrect,
+          confidence: lastGestureMessage.confidence
+        }));
+        setAiSource("mock");
+        setIsAiLoading(false);
+      }
+    } else {
+      setAiFeedback(buildLocalAiFeedback({
+        targetGesture,
+        actualGesture: lastGestureMessage.gesture,
+        isCorrect,
+        confidence: lastGestureMessage.confidence
+      }));
+      setAiSource("mock");
       setIsAiLoading(false);
-    });
+    }
 
     setWaitingBridgeGesture(false);
-  }, [bridgeOnline, lastGestureMessage, targetGesture, waitingBridgeGesture]);
+  }, [bridgeOnline, lastGestureMessage, sendBridgeMessage, targetGesture, waitingBridgeGesture]);
+
+  useEffect(() => {
+    if (!lastAiFeedbackMessage) {
+      return;
+    }
+
+    setAiFeedback(lastAiFeedbackMessage.result);
+    setAiSource(lastAiFeedbackMessage.source);
+    setIsAiLoading(false);
+  }, [lastAiFeedbackMessage]);
 
   useEffect(() => {
     if (bridgeOnline) {
@@ -332,6 +367,30 @@ function TopStatusCard({ title, value }: { title: string; value: string }) {
       <p className="mt-2 text-lg font-black text-white">{value}</p>
     </div>
   );
+}
+
+function buildLocalAiFeedback({
+  targetGesture,
+  actualGesture,
+  isCorrect,
+  confidence
+}: {
+  targetGesture: GestureType;
+  actualGesture: GestureType;
+  isCorrect: boolean;
+  confidence: number;
+}) {
+  if (isCorrect) {
+    const praises = [
+      "本次动作完成得很稳，姿态保持和节奏控制都比较好，可以继续保持当前训练强度。",
+      "这次识别结果很准确，说明你的动作边界已经比较清晰，接下来可以继续拉长保持时长。",
+      "训练表现不错，动作收放比较到位，建议下一轮继续保持专注，把稳定性再提高一点。"
+    ];
+
+    return praises[Math.floor(Math.random() * praises.length)];
+  }
+
+  return `本轮目标动作是“${GESTURE_MAP[targetGesture]}”，系统识别为“${GESTURE_MAP[actualGesture]}”。建议先放慢动作切换速度，注意手指展开或握合的一致性。当前置信度约为 ${confidence}%。`;
 }
 
 export default App;

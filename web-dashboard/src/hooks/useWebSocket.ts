@@ -1,5 +1,15 @@
 ﻿import { useCallback, useEffect, useRef, useState } from "react";
-import { BridgeMessage, BridgeStatus, CareMessage, GESTURE_MAP, GestureMessage, GestureType, SignMessage, SystemMessage } from "../types";
+import {
+  AiFeedbackMessage,
+  BridgeMessage,
+  BridgeStatus,
+  CareMessage,
+  GESTURE_MAP,
+  GestureMessage,
+  GestureType,
+  SignMessage,
+  SystemMessage
+} from "../types";
 
 const allGestures = Object.keys(GESTURE_MAP) as GestureType[];
 const BRIDGE_WS_URL = "ws://localhost:8765";
@@ -9,8 +19,10 @@ export const useWebSocket = () => {
   const [lastGestureMessage, setLastGestureMessage] = useState<GestureMessage | null>(null);
   const [lastSignMessage, setLastSignMessage] = useState<SignMessage | null>(null);
   const [lastCareMessage, setLastCareMessage] = useState<CareMessage | null>(null);
+  const [lastAiFeedbackMessage, setLastAiFeedbackMessage] = useState<AiFeedbackMessage | null>(null);
   const [lastSystemMessage, setLastSystemMessage] = useState<SystemMessage | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
     let socket: WebSocket | null = null;
@@ -47,12 +59,18 @@ export const useWebSocket = () => {
         return;
       }
 
+      if (message.type === "ai_feedback") {
+        setLastAiFeedbackMessage(message);
+        return;
+      }
+
       setLastSystemMessage(message);
     };
 
     const connect = () => {
       try {
         socket = new window.WebSocket(BRIDGE_WS_URL);
+        socketRef.current = socket;
       } catch {
         setBridgeStatus("offline");
         scheduleReconnect();
@@ -86,6 +104,7 @@ export const useWebSocket = () => {
         }
 
         setBridgeStatus("offline");
+        socketRef.current = null;
         scheduleReconnect();
       };
     };
@@ -99,6 +118,7 @@ export const useWebSocket = () => {
         window.clearTimeout(reconnectTimerRef.current);
       }
 
+      socketRef.current = null;
       socket?.close();
     };
   }, []);
@@ -123,13 +143,26 @@ export const useWebSocket = () => {
     setLastGestureMessage(mockData);
   }, []);
 
+  const sendBridgeMessage = useCallback((message: { type: "gesture" | "command"; data: unknown }) => {
+    const socket = socketRef.current;
+
+    if (!socket || socket.readyState !== window.WebSocket.OPEN) {
+      return false;
+    }
+
+    socket.send(JSON.stringify(message));
+    return true;
+  }, []);
+
   return {
     bridgeStatus,
     isConnected: bridgeStatus === "online",
     lastGestureMessage,
     lastSignMessage,
     lastCareMessage,
+    lastAiFeedbackMessage,
     lastSystemMessage,
-    simulateWebSocketMessage
+    simulateWebSocketMessage,
+    sendBridgeMessage
   };
 };
