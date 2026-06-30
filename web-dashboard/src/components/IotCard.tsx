@@ -1,4 +1,4 @@
-import { AlertOctagon, Fan, Lightbulb, PlugZap } from "lucide-react";
+﻿import { AlertOctagon, Fan, Lightbulb, PlugZap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import React, { useState } from "react";
 
@@ -48,6 +48,10 @@ export const IotCard: React.FC = () => {
         <PlugZap className="text-teal-300" size={22} />
         物联网家电远控
       </h2>
+
+      <div className="mt-4 rounded-2xl border border-teal-300/20 bg-teal-300/10 p-4 text-sm text-teal-100">
+        当前为 Mock 控制状态，后续可接入 MQTT 远控链路。
+      </div>
 
       <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
         <DeviceButton

@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock3, Fingerprint, Percent, XCircle } from "lucide-react";
+﻿import { CheckCircle2, Clock3, Fingerprint, Percent, XCircle } from "lucide-react";
 import React from "react";
 import { GESTURE_MAP, WSMessage } from "../types";
 
@@ -40,7 +40,7 @@ export const ResultCard: React.FC<Props> = ({ data, isCorrect }) => {
           </div>
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-slate-500">Recognition</p>
-            <p className="mt-1 text-2xl font-black text-white">{GESTURE_MAP[data.gesture]}</p>
+            <p className="mt-1 text-2xl font-black text-white">{GECTURE_MAP_FIX(data.gesture)}</p>
           </div>
         </div>
         <div
@@ -75,3 +75,7 @@ export const ResultCard: React.FC<Props> = ({ data, isCorrect }) => {
     </section>
   );
 };
+
+function GECTURE_MAP_FIX(gesture: WSMessage["gesture"]) {
+  return GESTURE_MAP[gesture];
+}

@@ -1,4 +1,4 @@
-import { GESTURE_MAP, GestureType } from "../types";
+﻿import { GestureType, GESTURE_MAP } from "../types";
 
 export interface AiFeedbackRequest {
   targetGesture: GestureType;

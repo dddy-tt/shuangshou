@@ -1,27 +1,50 @@
-import { Activity, ChevronRight, Home, Radar } from "lucide-react";
+﻿import { Activity, ChevronRight, HeartPulse, Home, Languages, Radar } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
+import { CareMonitoringPanel } from "./components/CareMonitoringPanel";
 import { FeedbackCard } from "./components/FeedbackCard";
 import { IotCard } from "./components/IotCard";
 import { ResultCard } from "./components/ResultCard";
+import { SignTranslationPanel } from "./components/SignTranslationPanel";
 import { StatsCard } from "./components/StatsCard";
 import { StatusCard } from "./components/StatusCard";
 import { TaskCard } from "./components/TaskCard";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { fetchAiFeedback } from "./services/aiService";
-import { DashboardTab, GestureType, TrainingRecord, TrainingStats } from "./types";
+import {
+  CareMonitoringState,
+  DashboardTab,
+  GestureType,
+  SIGN_TRANSLATION_MAP,
+  SignGestureType,
+  SignTranslationRecord,
+  TrainingRecord,
+  TrainingStats
+} from "./types";
+
+const signGestureOrder: SignGestureType[] = ["HELP", "DRINK", "PAIN"];
+
+const careScenarios: CareMonitoringState[] = [
+  { hr: 76, spo2: 98, fallDetected: false, sosActive: false, reminder: "状态平稳，建议继续保持日常观察。" },
+  { hr: 82, spo2: 97, fallDetected: false, sosActive: false, reminder: "训练后可适当补水，保持舒适坐姿。" },
+  { hr: 79, spo2: 99, fallDetected: true, sosActive: true, reminder: "检测到异常姿态，请尽快查看当前状态。" }
+];
+
+const tabLabelMap: Record<DashboardTab, string> = {
+  translation: "手语翻译",
+  rehab: "AI 康复训练",
+  care: "护理监测",
+  iot: "家电远控"
+};
 
 function App() {
   const { isConnected, lastMessage, simulateWebSocketMessage } = useWebSocket();
-  const [activeTab, setActiveTab] = useState<DashboardTab>("training");
+  const [activeTab, setActiveTab] = useState<DashboardTab>("translation");
   const [targetGesture, setTargetGesture] = useState<GestureType>("RIGHT_OPEN");
   const [aiFeedback, setAiFeedback] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const [stats, setStats] = useState<TrainingStats>({
-    total: 0,
-    correct: 0,
-    streak: 0,
-    history: []
-  });
+  const [stats, setStats] = useState<TrainingStats>({ total: 0, correct: 0, streak: 0, history: [] });
+  const [translationRecords, setTranslationRecords] = useState<SignTranslationRecord[]>(() => [createSignRecord(0)]);
+  const [careIndex, setCareIndex] = useState(0);
 
   useEffect(() => {
     if (!lastMessage) {
@@ -65,7 +88,39 @@ function App() {
     });
   }, [lastMessage, targetGesture]);
 
-  const tabContent = useMemo(() => {
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setCareIndex((previous) => (previous + 1) % careScenarios.length);
+    }, 4500);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const currentTranslation = translationRecords[0];
+  const currentCare = careScenarios[careIndex];
+
+  const handleSimulateTranslation = () => {
+    setTranslationRecords((previous) => {
+      const nextRecord = createSignRecord(previous.length);
+      return [nextRecord, ...previous].slice(0, 8);
+    });
+  };
+
+  const moduleContent = useMemo(() => {
+    if (activeTab === "translation") {
+      return (
+        <SignTranslationPanel
+          currentRecord={currentTranslation}
+          records={translationRecords}
+          onSimulate={handleSimulateTranslation}
+        />
+      );
+    }
+
+    if (activeTab === "care") {
+      return <CareMonitoringPanel monitoring={currentCare} />;
+    }
+
     if (activeTab === "iot") {
       return (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
@@ -92,7 +147,7 @@ function App() {
         </div>
       </div>
     );
-  }, [activeTab, aiFeedback, isAiLoading, isConnected, lastMessage, simulateWebSocketMessage, stats, targetGesture]);
+  }, [activeTab, aiFeedback, currentCare, currentTranslation, isAiLoading, isConnected, lastMessage, simulateWebSocketMessage, stats, targetGesture, translationRecords]);
 
   return (
     <div className="dashboard-shell">
@@ -103,64 +158,79 @@ function App() {
             <div className="max-w-3xl">
               <div className="inline-flex items-center gap-2 rounded-full border border-sky-300/20 bg-sky-300/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.35em] text-sky-100">
                 <Radar size={14} />
-                Mock Training Dashboard
+                Mock Frontend Dashboard
               </div>
-              <h1
-                className="mt-4 text-4xl font-black leading-tight text-white sm:text-5xl"
-                style={{ fontFamily: '"ZCOOL XiaoWei", serif' }}
-              >
-                双手手语手套训练看板
+              <h1 className="mt-4 text-4xl font-black leading-tight text-white sm:text-5xl" style={{ fontFamily: '"ZCOOL XiaoWei", serif' }}>
+                双手智能手语交互手套系统
               </h1>
               <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-300 sm:text-base">
-                围绕“目标动作选择、训练采集、识别结果、AI 康复训练辅助反馈、历史追踪”构建的纯前端 Mock 演示页，
+                将手语翻译、AI 康复训练、护理监测和家电远控整合到同一套前端 Mock 看板中，
                 用于后续串口、MQTT 和 AI 服务接入前的联调预演。
               </p>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-500">模式</p>
-                <p className="mt-2 text-lg font-black text-white">无硬件 Mock</p>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-500">端口</p>
-                <p className="mt-2 text-lg font-black text-white">localhost:3000</p>
-              </div>
-              <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
-                <p className="text-xs uppercase tracking-[0.25em] text-slate-500">状态</p>
-                <p className="mt-2 text-lg font-black text-white">{isConnected ? "训练链路已就绪" : "连接中"}</p>
-              </div>
+              <TopStatusCard title="模式" value="无硬件 Mock" />
+              <TopStatusCard title="端口" value="localhost:3000" />
+              <TopStatusCard title="状态" value="前端演示就绪" />
             </div>
           </div>
         </header>
 
         <div className="mt-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex flex-wrap items-center gap-3">
-            <button
-              className={`tab-button ${activeTab === "training" ? "tab-button-active" : "tab-button-idle"}`}
-              onClick={() => setActiveTab("training")}
-            >
-              <Activity size={16} className="mr-2 inline-block" />
-              训练看板
-            </button>
-            <button
-              className={`tab-button ${activeTab === "iot" ? "tab-button-active" : "tab-button-idle"}`}
-              onClick={() => setActiveTab("iot")}
-            >
-              <Home size={16} className="mr-2 inline-block" />
-              家电远控
-            </button>
+            <NavButton active={activeTab === "translation"} onClick={() => setActiveTab("translation")} icon={<Languages size={16} className="mr-2 inline-block" />} label="手语翻译" />
+            <NavButton active={activeTab === "rehab"} onClick={() => setActiveTab("rehab")} icon={<Activity size={16} className="mr-2 inline-block" />} label="AI 康复训练" />
+            <NavButton active={activeTab === "care"} onClick={() => setActiveTab("care")} icon={<HeartPulse size={16} className="mr-2 inline-block" />} label="护理监测" />
+            <NavButton active={activeTab === "iot"} onClick={() => setActiveTab("iot")} icon={<Home size={16} className="mr-2 inline-block" />} label="家电远控" />
           </div>
 
           <div className="flex items-center gap-2 text-sm text-slate-400">
-            <span>训练链路</span>
+            <span>功能模块</span>
             <ChevronRight size={16} />
-            <span className="font-bold text-slate-200">{activeTab === "training" ? "训练看板" : "家电远控"}</span>
+            <span className="font-bold text-slate-200">{tabLabelMap[activeTab]}</span>
           </div>
         </div>
 
-        <main className="mt-6">{tabContent}</main>
+        <main className="mt-6">{moduleContent}</main>
       </div>
+    </div>
+  );
+}
+
+function createSignRecord(seed: number): SignTranslationRecord {
+  const gesture = signGestureOrder[seed % signGestureOrder.length];
+  const statuses: SignTranslationRecord["voiceStatus"][] = ["播报中", "待播报", "已播报"];
+
+  return {
+    id: `${Date.now()}-${seed}`,
+    gesture,
+    text: SIGN_TRANSLATION_MAP[gesture],
+    confidence: 86 + ((seed * 7) % 12),
+    voiceStatus: statuses[seed % statuses.length],
+    time: new Date().toLocaleTimeString("zh-CN", {
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    })
+  };
+}
+
+function NavButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+  return (
+    <button className={`tab-button ${active ? "tab-button-active" : "tab-button-idle"}`} onClick={onClick}>
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function TopStatusCard({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+      <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{title}</p>
+      <p className="mt-2 text-lg font-black text-white">{value}</p>
     </div>
   );
 }

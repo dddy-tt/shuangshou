@@ -1,4 +1,4 @@
-import { Play, Target } from "lucide-react";
+﻿import { Play, Target } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { GESTURE_MAP, GestureType } from "../types";
 
@@ -54,7 +54,7 @@ export const TaskCard: React.FC<Props> = ({ target, setTarget, onStart }) => {
 
           <div className="rounded-[24px] border border-sky-300/20 bg-sky-300/10 p-5">
             <p className="text-sm font-medium text-sky-100">本轮目标</p>
-            <p className="mt-2 text-3xl font-black tracking-wide text-white">{GESTURE_MAP[target]}</p>
+            <p className="mt-2 text-3xl font-black tracking-wide text-white">{GECTURE_MAP_FIX(target)}</p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-slate-950/30 p-4 text-center">
@@ -80,3 +80,7 @@ export const TaskCard: React.FC<Props> = ({ target, setTarget, onStart }) => {
     </section>
   );
 };
+
+function GECTURE_MAP_FIX(gesture: GestureType) {
+  return GESTURE_MAP[gesture];
+}

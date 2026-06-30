@@ -1,4 +1,4 @@
-import { BrainCircuit, Sparkles } from "lucide-react";
+﻿import { BrainCircuit, Sparkles } from "lucide-react";
 import React from "react";
 
 interface Props {
@@ -14,7 +14,7 @@ export const FeedbackCard: React.FC<Props> = ({ feedback, isLoading }) => (
         AI 康复训练辅助反馈
       </h2>
       <span className="rounded-full border border-fuchsia-300/20 bg-fuchsia-300/10 px-3 py-1 text-xs font-bold text-fuchsia-100">
-        AI 康复训练建议
+        状态提示
       </span>
     </div>
 

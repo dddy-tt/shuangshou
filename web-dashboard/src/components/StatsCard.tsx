@@ -1,4 +1,4 @@
-import { BarChart3, CheckCircle2, History, Target, Trophy } from "lucide-react";
+﻿import { BarChart3, CheckCircle2, History, Target, Trophy } from "lucide-react";
 import React from "react";
 import { GESTURE_MAP, TrainingStats } from "../types";
 
@@ -60,9 +60,9 @@ export const StatsCard: React.FC<Props> = ({ stats }) => {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-bold text-white">{GESTURE_MAP[record.target]}</p>
+                    <p className="text-sm font-bold text-white">{GECTURE_MAP_FIX(record.target)}</p>
                     <p className="mt-1 text-xs text-slate-400">
-                      识别结果：{GESTURE_MAP[record.actual]} · 置信度 {record.confidence}%
+                      识别结果：{GECTURE_MAP_FIX(record.actual)} · 置信度 {record.confidence}%
                     </p>
                   </div>
                   <div className="text-right">
@@ -85,3 +85,7 @@ export const StatsCard: React.FC<Props> = ({ stats }) => {
     </section>
   );
 };
+
+function GECTURE_MAP_FIX(gesture: keyof typeof GESTURE_MAP) {
+  return GESTURE_MAP[gesture];
+}

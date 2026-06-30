@@ -1,4 +1,4 @@
-import { Activity, Cpu, Radio, Sparkles } from "lucide-react";
+﻿import { Activity, Cpu, Radio, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import React from "react";
 
@@ -41,9 +41,9 @@ export const StatusCard: React.FC<Props> = ({ wsConnected }) => (
     </h2>
 
     <div className="mt-5 space-y-3">
-      <StatusItem icon={Cpu} label="手套训练链路" active={wsConnected} helper="纯前端 Mock 连接状态" />
-      <StatusItem icon={Radio} label="串口 / MQTT 桥接预留" active helper="当前仅做前端预演，不接真实链路" />
-      <StatusItem icon={Sparkles} label="AI 反馈引擎" active helper="本地模拟反馈逻辑已启用" />
+      <StatusItem icon={Cpu} label="手套数据链路" active={wsConnected} helper="纯前端 Mock 连接状态" />
+      <StatusItem icon={Radio} label="串口 / MQTT 桥接预留" active={true} helper="当前仅做前端预演，不接真实链路" />
+      <StatusItem icon={Sparkles} label="AI 反馈引擎" active={true} helper="本地模拟反馈逻辑已启用" />
     </div>
 
     <div className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-300/10 p-4 text-sm text-amber-100">
