@@ -5,7 +5,7 @@ const dotenv = require("dotenv");
 const { WebSocketServer } = require("ws");
 
 const { nextMockMessage } = require("./mockGenerator");
-const { buildAiFeedback } = require("./aiFeedback");
+const { generateAiFeedback } = require("./aiFeedback");
 const { publishControl } = require("./mqttClient");
 const { parseFrame } = require("./frameParser");
 
@@ -29,9 +29,9 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.post("/api/ai-feedback", (req, res) => {
-  const feedback = buildAiFeedback(req.body);
-  res.json({ feedback });
+app.post("/api/ai-feedback", async (req, res) => {
+  const result = await generateAiFeedback(req.body);
+  res.json(result);
 });
 
 app.post("/api/control", (req, res) => {
