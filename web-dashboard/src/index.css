@@ -1,0 +1,102 @@
+@import url("https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700;800&family=ZCOOL+XiaoWei&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color: #e2e8f0;
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.12), transparent 28%),
+    radial-gradient(circle at top right, rgba(245, 158, 11, 0.16), transparent 24%),
+    linear-gradient(180deg, #08111f 0%, #0f172a 42%, #111827 100%);
+  font-family: "Noto Sans SC", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  color: #e2e8f0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+@layer base {
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .dashboard-shell {
+    @apply min-h-screen overflow-hidden bg-transparent text-slate-100;
+  }
+
+  .panel {
+    @apply rounded-[28px] border border-white/10 bg-white/10 p-5 shadow-panel backdrop-blur-xl;
+  }
+
+  .panel-title {
+    @apply flex items-center gap-3 border-b border-white/10 pb-3 text-lg font-bold text-white;
+  }
+
+  .tab-button {
+    @apply rounded-full border px-4 py-2 text-sm font-bold tracking-wide transition-all duration-200;
+  }
+
+  .tab-button-active {
+    @apply border-sky-300 bg-sky-300 text-slate-950 shadow-lg shadow-sky-400/20;
+  }
+
+  .tab-button-idle {
+    @apply border-white/10 bg-white/5 text-slate-300 hover:border-white/20 hover:bg-white/10;
+  }
+
+  .primary-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-400 px-5 py-3 font-bold text-slate-950 transition hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-slate-500 disabled:text-slate-200;
+  }
+
+  .metric-tile {
+    @apply rounded-2xl border border-white/10 bg-slate-950/30 p-4;
+  }
+}
+
+.noise-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.08;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.2) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.16) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(circle at center, black, transparent 78%);
+}
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+}
