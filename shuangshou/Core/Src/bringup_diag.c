@@ -24,9 +24,10 @@ void BringupDiag_SetJYLeftResult(uint8_t ok, uint8_t ret)
     g_bringup_diag.jy_left_ret = ret;
 }
 
-void BringupDiag_SetMAX30102(uint8_t ok)
+void BringupDiag_SetMAX30102Result(uint8_t ok, uint8_t ret)
 {
     g_bringup_diag.max_ok = ok ? 1U : 0U;
+    g_bringup_diag.max_ret = ret;
 }
 
 void BringupDiag_SetADCSeen(uint8_t adc1_seen, uint8_t adc2_seen)
@@ -61,12 +62,13 @@ uint8_t BringupDiag_TrySend(UART_HandleTypeDef *huart)
     }
 
     len = snprintf(g_bringup_line, sizeof(g_bringup_line),
-                   "BRINGUP: JY_R=%u,JY_L=%u,JY_R_RET=%u,JY_L_RET=%u,MAX=%u,ADC1=%u,ADC2=%u,DEG=%u\r\n",
+                   "BRINGUP: JY_R=%u,JY_L=%u,JY_R_RET=%u,JY_L_RET=%u,MAX=%u,MAX_RET=%u,ADC1=%u,ADC2=%u,DEG=%u\r\n",
                    g_bringup_diag.jy_right_ok,
                    g_bringup_diag.jy_left_ok,
                    g_bringup_diag.jy_right_ret,
                    g_bringup_diag.jy_left_ret,
                    g_bringup_diag.max_ok,
+                   g_bringup_diag.max_ret,
                    g_bringup_diag.adc1_seen,
                    g_bringup_diag.adc2_seen,
                    g_bringup_diag.degraded);

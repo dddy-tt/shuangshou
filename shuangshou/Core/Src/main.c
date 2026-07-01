@@ -185,12 +185,12 @@ int main(void)
   /* 阶段 5：初始化 MAX30102，失败时允许系统降级运行 */
   {
       uint8_t max30102_status = MAX30102_Init();
-      if (max30102_status == 0) {
+      if (max30102_status == 0U) {
           max30102_present = 1;
-          BringupDiag_SetMAX30102(1);
+          BringupDiag_SetMAX30102Result(1, max30102_status);
       } else {
           max30102_present = 0;
-          BringupDiag_SetMAX30102(0);
+          BringupDiag_SetMAX30102Result(0, max30102_status);
           /* MAX30102 不在线时，仅关闭心率/血氧功能，不阻塞其他模块 */
           /* 当前仍处于无实物阶段，这条降级路径也方便空板联调 */
       }
@@ -446,7 +446,25 @@ int main(void)
         frame[pos++] = csum;
         frame[pos++] = 0xBBU;
 
-        BT_SendRaw(frame, pos);
+        {
+            char flex_line[128];
+            char imu_line[64];
+
+            snprintf(flex_line, sizeof(flex_line),
+                     "FLEX|L1=%u|L2=%u|L3=%u|L4=%u|L5=%u|R1=%u|R2=%u|R3=%u|R4=%u|R5=%u\r\n",
+                     Flex_GetPercent(1, 0), Flex_GetPercent(1, 1), Flex_GetPercent(1, 2),
+                     Flex_GetPercent(1, 3), Flex_GetPercent(1, 4), Flex_GetPercent(0, 0),
+                     Flex_GetPercent(0, 1), Flex_GetPercent(0, 2), Flex_GetPercent(0, 3),
+                     Flex_GetPercent(0, 4));
+            BT_SendString(flex_line);
+
+            snprintf(imu_line, sizeof(imu_line),
+                     "IMU|R=%.2f|P=%.2f|Y=%.2f\r\n",
+                     (double)JY61P_Right.angle[0],
+                     (double)JY61P_Right.angle[1],
+                     (double)JY61P_Right.angle[2]);
+            BT_SendString(imu_line);
+        }
 
         BringupDiag_SetADCSeen(Flex_HasValidSnapshot(0), Flex_HasValidSnapshot(1));
         if ((now - t_bringup_diag) >= 1000U) {
