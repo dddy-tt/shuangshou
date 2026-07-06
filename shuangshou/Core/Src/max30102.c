@@ -25,6 +25,7 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "max30102.h"
+#include "bringup_diag.h"
 #include "soft_i2c.h"
 #include "string.h"
 #include "stm32f4xx_hal.h"
@@ -74,6 +75,7 @@ static void ppg_process(void);
 uint8_t MAX30102_Init(void)
 {
     uint8_t reg_val;
+    BringupDiag_SetMAX30102PartId(0x00U);
 
     /* Step 1: 软复位 */
     if (SoftI2C_WriteByte(SI2C_MAX30102, MAX30102_I2C_ADDR,
@@ -85,9 +87,10 @@ uint8_t MAX30102_Init(void)
     /* Step 2: 验证 PART_ID */
     if (SoftI2C_ReadByte(SI2C_MAX30102, MAX30102_I2C_ADDR,
                          MAX30102_PART_ID, &reg_val) != SI2C_OK) {
-        return 1;
+        return 2;
     }
-    if (reg_val != MAX30102_PART_ID_VAL) return 2;
+    BringupDiag_SetMAX30102PartId(reg_val);
+    if (reg_val != MAX30102_PART_ID_VAL) return 3;
 
     /* Step 3: 禁用中断 */
     SoftI2C_WriteByte(SI2C_MAX30102, MAX30102_I2C_ADDR,

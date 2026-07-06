@@ -1,9 +1,11 @@
 ﻿import { Activity, ChevronRight, HeartPulse, Home, Languages, Radar } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { CareMonitoringPanel } from "./components/CareMonitoringPanel";
+import { CustomGestureManager } from "./components/CustomGestureManager";
 import { FeedbackCard } from "./components/FeedbackCard";
 import { IotCard } from "./components/IotCard";
 import { ResultCard } from "./components/ResultCard";
+import { SensorMonitorView } from "./components/SensorMonitorView";
 import { SignTranslationPanel } from "./components/SignTranslationPanel";
 import { StatsCard } from "./components/StatsCard";
 import { StatusCard } from "./components/StatusCard";
@@ -12,6 +14,9 @@ import { useWebSocket } from "./hooks/useWebSocket";
 import {
   AiFeedbackSource,
   CareMonitoringState,
+  CustomGestureCategory,
+  CustomGestureItem,
+  CustomGestureMatchMessage,
   DashboardTab,
   GESTURE_MAP,
   GestureType,
@@ -24,6 +29,7 @@ import {
 } from "./types";
 
 const signGestureOrder: SignGestureType[] = ["HELP", "DRINK", "PAIN"];
+const fingerMockBase = [18, 32, 45, 58, 71];
 
 const careScenarios: CareMonitoringState[] = [
   { hr: 76, spo2: 98, fallDetected: false, sosActive: false, reminder: "状态平稳，建议继续保持日常观察。" },
@@ -38,12 +44,17 @@ const tabLabelMap: Record<DashboardTab, string> = {
   iot: "家电远控"
 };
 
+type DeviceKey = "light" | "fan" | "socket" | "sos";
+type DeviceState = Record<DeviceKey, boolean>;
+
 function App() {
   const {
     bridgeStatus,
     lastAiFeedbackMessage,
     lastCareMessage,
+    lastCustomGestureMatchMessage,
     lastGestureMessage,
+    lastSensorRawMessage,
     lastSignMessage,
     lastSystemMessage,
     simulateWebSocketMessage,
@@ -60,6 +71,36 @@ function App() {
   const [translationRecords, setTranslationRecords] = useState<SignTranslationRecord[]>(() => [createSignRecord(0)]);
   const [careIndex, setCareIndex] = useState(0);
   const [careState, setCareState] = useState<CareMonitoringState>(careScenarios[0]);
+  const [flexState, setFlexState] = useState({
+    left: null as number | null,
+    right: null as number | null,
+    leftFingers: null as number[] | null,
+    rightFingers: null as number[] | null,
+    normalizedLeft: null as number | null,
+    normalizedRight: null as number | null,
+    normalizedLeftFingers: null as Array<number | null> | null,
+    normalizedRightFingers: null as Array<number | null> | null
+  });
+  const [imuState, setImuState] = useState({
+    roll: 0,
+    pitch: 0,
+    yaw: 0
+  });
+  const [calibrationBusy, setCalibrationBusy] = useState(false);
+  const [calibrationMessage, setCalibrationMessage] = useState("串口上报后可进行 FLEX 置零、握满和 IMU 置零。");
+  const [customGestureName, setCustomGestureName] = useState("");
+  const [customGestureAction, setCustomGestureAction] = useState("");
+  const [customGestureCategory, setCustomGestureCategory] = useState<CustomGestureCategory>("translation");
+  const [customGestureItems, setCustomGestureItems] = useState<CustomGestureItem[]>([]);
+  const [customGestureBusy, setCustomGestureBusy] = useState(false);
+  const [customGestureMessage, setCustomGestureMessage] = useState("可将当前十指和 IMU 姿态保存为自定义手势模板。");
+  const [trainingPrompt, setTrainingPrompt] = useState("点击“随机选择训练手势”后，系统会从训练手势库里抽一个动作给你练习。");
+  const [devices, setDevices] = useState<DeviceState>({
+    light: false,
+    fan: false,
+    socket: false,
+    sos: false
+  });
 
   const bridgeOnline = bridgeStatus === "online";
 
@@ -165,6 +206,40 @@ function App() {
   }, [bridgeOnline, careIndex]);
 
   useEffect(() => {
+    if (bridgeOnline) {
+      return;
+    }
+
+    const updateMockSensors = () => {
+      const seed = Date.now();
+      const leftFingers = fingerMockBase.map((base, index) => base + ((Math.floor(seed / 700) + index * 9) % 18));
+      const rightFingers = fingerMockBase.map((base, index) => base + 8 + ((Math.floor(seed / 900) + index * 7) % 20));
+
+      setFlexState({
+        left: leftFingers.reduce((sum, value) => sum + value, 0),
+        right: rightFingers.reduce((sum, value) => sum + value, 0),
+        leftFingers,
+        rightFingers,
+        normalizedLeft: Number((leftFingers.reduce((sum, value) => sum + value, 0) / 500).toFixed(2)),
+        normalizedRight: Number((rightFingers.reduce((sum, value) => sum + value, 0) / 500).toFixed(2)),
+        normalizedLeftFingers: leftFingers.map((value) => Number((value / 100).toFixed(2))),
+        normalizedRightFingers: rightFingers.map((value) => Number((value / 100).toFixed(2)))
+      });
+
+      setImuState({
+        roll: Number((Math.sin(seed / 1200) * 24).toFixed(2)),
+        pitch: Number((Math.cos(seed / 1500) * 18).toFixed(2)),
+        yaw: Number(((seed / 45) % 360).toFixed(2))
+      });
+    };
+
+    updateMockSensors();
+    const timer = window.setInterval(updateMockSensors, 2000);
+
+    return () => window.clearInterval(timer);
+  }, [bridgeOnline]);
+
+  useEffect(() => {
     if (!lastSignMessage) {
       return;
     }
@@ -203,13 +278,100 @@ function App() {
   }, [lastCareMessage]);
 
   useEffect(() => {
+    if (!lastSensorRawMessage) {
+      return;
+    }
+
+    if (lastSensorRawMessage.sensor === "flex") {
+      setFlexState({
+        left: lastSensorRawMessage.left,
+        right: lastSensorRawMessage.right,
+        leftFingers: lastSensorRawMessage.leftFingers,
+        rightFingers: lastSensorRawMessage.rightFingers,
+        normalizedLeft: lastSensorRawMessage.normalizedLeft,
+        normalizedRight: lastSensorRawMessage.normalizedRight,
+        normalizedLeftFingers: lastSensorRawMessage.normalizedLeftFingers,
+        normalizedRightFingers: lastSensorRawMessage.normalizedRightFingers
+      });
+      return;
+    }
+
+    setImuState({
+      roll: lastSensorRawMessage.roll,
+      pitch: lastSensorRawMessage.pitch,
+      yaw: lastSensorRawMessage.yaw
+    });
+  }, [lastSensorRawMessage]);
+
+  useEffect(() => {
     if (!bridgeOnline) {
       setWaitingBridgeGesture(false);
     }
   }, [bridgeOnline]);
 
+  useEffect(() => {
+    if (!lastCustomGestureMatchMessage) {
+      return;
+    }
+
+    applyCustomGestureMatch(lastCustomGestureMatchMessage, {
+      setTranslationRecords,
+      setDevices,
+      setTrainingPrompt,
+      setCustomGestureMessage
+    });
+  }, [lastCustomGestureMatchMessage]);
+
+  useEffect(() => {
+    const loadCustomGestures = async () => {
+      try {
+        const response = await window.fetch("http://localhost:8765/api/custom-gestures");
+        const result = (await response.json()) as { ok?: boolean; items?: CustomGestureItem[] };
+
+        if (!response.ok || !result.ok) {
+          throw new Error("加载自定义手势失败");
+        }
+
+        setCustomGestureItems(Array.isArray(result.items) ? result.items : []);
+        setCustomGestureMessage("已从 bridge 加载自定义手势列表。");
+      } catch (error) {
+        setCustomGestureMessage(error instanceof Error ? error.message : "bridge 未启动，暂时无法读取自定义手势。");
+      }
+    };
+
+    void loadCustomGestures();
+  }, []);
+
   const currentTranslation = translationRecords[0];
   const currentCare = careState;
+
+  const sendCalibrationRequest = async (action: "zero" | "full" | "imu-zero") => {
+    setCalibrationBusy(true);
+
+    try {
+      const response = await window.fetch(`http://localhost:8765/api/calibration/${action}`, {
+        method: "POST"
+      });
+
+      const result = (await response.json()) as { ok?: boolean; message?: string };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || "校准请求失败");
+      }
+
+      if (action === "zero") {
+        setCalibrationMessage("置零成功，已记录当前 FLEX 原始值作为 offset。");
+      } else if (action === "full") {
+        setCalibrationMessage("握满成功，已记录当前 FLEX 原始值作为 full scale。");
+      } else {
+        setCalibrationMessage("IMU 置零成功，当前姿态已作为参考姿态。");
+      }
+    } catch (error) {
+      setCalibrationMessage(error instanceof Error ? error.message : "校准请求失败");
+    } finally {
+      setCalibrationBusy(false);
+    }
+  };
 
   const handleSimulateTranslation = () => {
     if (bridgeOnline) {
@@ -229,6 +391,98 @@ function App() {
     }
 
     simulateWebSocketMessage(targetGesture);
+  };
+
+  const handleCaptureCustomGesture = async () => {
+    if (!customGestureName.trim() || !customGestureAction.trim()) {
+      setCustomGestureMessage("请先填写手势名称和动作内容。");
+      return;
+    }
+
+    if (!Array.isArray(flexState.leftFingers) || !Array.isArray(flexState.rightFingers)) {
+      setCustomGestureMessage("当前还没有十指数据，先等待传感器上报后再保存。");
+      return;
+    }
+
+    setCustomGestureBusy(true);
+
+    try {
+      const response = await window.fetch("http://localhost:8765/api/custom-gestures", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          name: customGestureName.trim(),
+          category: customGestureCategory,
+          action: customGestureAction.trim(),
+          snapshot: {
+            leftFingers: flexState.leftFingers,
+            rightFingers: flexState.rightFingers,
+            roll: imuState.roll,
+            pitch: imuState.pitch,
+            yaw: imuState.yaw
+          }
+        })
+      });
+
+      const result = (await response.json()) as { ok?: boolean; item?: CustomGestureItem; message?: string };
+
+      if (!response.ok || !result.ok || !result.item) {
+        throw new Error(result.message || "保存自定义手势失败");
+      }
+
+      setCustomGestureItems((previous) => [result.item as CustomGestureItem, ...previous]);
+      setCustomGestureMessage(`已保存手势“${result.item.name}”。`);
+      setCustomGestureName("");
+      setCustomGestureAction("");
+    } catch (error) {
+      setCustomGestureMessage(error instanceof Error ? error.message : "保存自定义手势失败");
+    } finally {
+      setCustomGestureBusy(false);
+    }
+  };
+
+  const handleDeleteCustomGesture = async (id: string) => {
+    setCustomGestureBusy(true);
+
+    try {
+      const response = await window.fetch(`http://localhost:8765/api/custom-gestures/${id}`, {
+        method: "DELETE"
+      });
+      const result = (await response.json()) as { ok?: boolean; message?: string };
+
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || "删除自定义手势失败");
+      }
+
+      setCustomGestureItems((previous) => previous.filter((item) => item.id !== id));
+      setCustomGestureMessage("已删除选中的自定义手势。");
+    } catch (error) {
+      setCustomGestureMessage(error instanceof Error ? error.message : "删除自定义手势失败");
+    } finally {
+      setCustomGestureBusy(false);
+    }
+  };
+
+  const handleToggleDevice = (key: DeviceKey) => {
+    setDevices((previous) => ({
+      ...previous,
+      [key]: !previous[key]
+    }));
+  };
+
+  const handlePickRandomTraining = () => {
+    const trainingItems = customGestureItems.filter((item) => item.category === "training");
+
+    if (!trainingItems.length) {
+      setTrainingPrompt("手势库里还没有训练类手势，先保存一个“训练目标”模板。");
+      return;
+    }
+
+    const picked = trainingItems[Math.floor(Math.random() * trainingItems.length)];
+    setTrainingPrompt(`随机训练任务：请完成“${picked.name}”，目标内容：${picked.action}`);
+    setActiveTab("rehab");
   };
 
   const modeValue =
@@ -258,7 +512,7 @@ function App() {
     if (activeTab === "iot") {
       return (
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-          <IotCard />
+          <IotCard devices={devices} onToggle={handleToggleDevice} />
           <StatusCard bridgeStatus={bridgeStatus} aiSource={aiSource} lastSystemMessage={bridgeNote} />
         </div>
       );
@@ -268,6 +522,10 @@ function App() {
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <div className="space-y-6">
           <TaskCard target={targetGesture} setTarget={setTargetGesture} onStart={handleStartTraining} />
+          <div className="rounded-2xl border border-fuchsia-300/15 bg-fuchsia-300/10 p-4 text-sm text-slate-200">
+            <p className="font-bold text-fuchsia-100">训练提示</p>
+            <p className="mt-2">{trainingPrompt}</p>
+          </div>
           <ResultCard data={trainingResult} isCorrect={trainingResult?.gesture === targetGesture} />
         </div>
 
@@ -281,7 +539,7 @@ function App() {
         </div>
       </div>
     );
-  }, [activeTab, aiFeedback, aiSource, bridgeNote, bridgeStatus, currentCare, currentTranslation, isAiLoading, stats, targetGesture, trainingResult, translationRecords]);
+  }, [activeTab, aiFeedback, aiSource, bridgeNote, bridgeStatus, currentCare, currentTranslation, devices, isAiLoading, stats, targetGesture, trainingPrompt, trainingResult, translationRecords]);
 
   return (
     <div className="dashboard-shell">
@@ -327,6 +585,45 @@ function App() {
         </div>
 
         <main className="mt-6">{moduleContent}</main>
+        <div className="mt-6">
+          <SensorMonitorView
+            flex={flexState}
+            imu={imuState}
+            onZero={() => {
+              void sendCalibrationRequest("zero");
+            }}
+            onFull={() => {
+              void sendCalibrationRequest("full");
+            }}
+            onImuZero={() => {
+              void sendCalibrationRequest("imu-zero");
+            }}
+            calibrationBusy={calibrationBusy}
+            calibrationMessage={calibrationMessage}
+          />
+        </div>
+        <div className="mt-6">
+          <CustomGestureManager
+            gestureName={customGestureName}
+            actionText={customGestureAction}
+            category={customGestureCategory}
+            items={customGestureItems}
+            latestMatch={lastCustomGestureMatchMessage}
+            busy={customGestureBusy}
+            message={customGestureMessage}
+            trainingPrompt={trainingPrompt}
+            onNameChange={setCustomGestureName}
+            onActionChange={setCustomGestureAction}
+            onCategoryChange={setCustomGestureCategory}
+            onCapture={() => {
+              void handleCaptureCustomGesture();
+            }}
+            onDelete={(id) => {
+              void handleDeleteCustomGesture(id);
+            }}
+            onPickRandomTraining={handlePickRandomTraining}
+          />
+        </div>
       </div>
     </div>
   );
@@ -391,6 +688,65 @@ function buildLocalAiFeedback({
   }
 
   return `本轮目标动作是“${GESTURE_MAP[targetGesture]}”，系统识别为“${GESTURE_MAP[actualGesture]}”。建议先放慢动作切换速度，注意手指展开或握合的一致性。当前置信度约为 ${confidence}%。`;
+}
+
+function applyCustomGestureMatch(
+  match: CustomGestureMatchMessage,
+  handlers: {
+    setTranslationRecords: React.Dispatch<React.SetStateAction<SignTranslationRecord[]>>;
+    setDevices: React.Dispatch<React.SetStateAction<DeviceState>>;
+    setTrainingPrompt: React.Dispatch<React.SetStateAction<string>>;
+    setCustomGestureMessage: React.Dispatch<React.SetStateAction<string>>;
+  }
+) {
+  if (match.item.category === "translation") {
+    handlers.setTranslationRecords((previous) => {
+      const nextRecord: SignTranslationRecord = {
+        id: `${match.timestamp}-${match.item.id}`,
+        gesture: "HELP",
+        text: match.item.action,
+        confidence: Math.max(60, 100 - Math.round(match.score)),
+        voiceStatus: "待播报",
+        time: new Date(match.timestamp).toLocaleTimeString("zh-CN", {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit"
+        })
+      };
+
+      return [nextRecord, ...previous].slice(0, 8);
+    });
+    handlers.setCustomGestureMessage(`已触发自定义翻译手势“${match.item.name}”。`);
+    return;
+  }
+
+  if (match.item.category === "control") {
+    const normalized = match.item.action.trim().toUpperCase();
+    const controlMap: Record<string, { key: DeviceKey; value: boolean } | undefined> = {
+      LIGHT_ON: { key: "light", value: true },
+      LIGHT_OFF: { key: "light", value: false },
+      FAN_ON: { key: "fan", value: true },
+      FAN_OFF: { key: "fan", value: false },
+      SOCKET_ON: { key: "socket", value: true },
+      SOCKET_OFF: { key: "socket", value: false },
+      SOS_ON: { key: "sos", value: true },
+      SOS_OFF: { key: "sos", value: false }
+    };
+
+    const target = controlMap[normalized];
+    if (target) {
+      handlers.setDevices((previous) => ({
+        ...previous,
+        [target.key]: target.value
+      }));
+      handlers.setCustomGestureMessage(`已触发自定义控制手势“${match.item.name}”，动作：${match.item.action}。`);
+    }
+    return;
+  }
+
+  handlers.setTrainingPrompt(`命中训练手势：${match.item.name}，建议按“${match.item.action}”继续完成动作。`);
+  handlers.setCustomGestureMessage(`已命中训练手势“${match.item.name}”。`);
 }
 
 export default App;

@@ -8,9 +8,14 @@ const { WebSocketServer } = require("ws");
 const { nextMockMessage } = require("./mockGenerator");
 const { generateAiFeedback } = require("./aiFeedback");
 const { publishControl } = require("./mqttClient");
+const {
+  readCustomGestures,
+  createCustomGesture,
+  deleteCustomGesture
+} = require("./customGestureStore");
 const { parseFrame } = require("./frameParser");
 const { createFramePipeline } = require("./framePipeline");
-const { normalizeSerialFrame, openSerialInput } = require("./serialInput");
+const { normalizeSerialFrame, parseSensorPayload, openSerialInput } = require("./serialInput");
 const {
   TASK_STATES,
   createTask,
@@ -45,6 +50,34 @@ const framePipeline = createFramePipeline({
 let mockTimer = null;
 let serialInputHandle = null;
 let shuttingDown = false;
+let lastCustomGestureMatch = {
+  id: null,
+  at: 0
+};
+const sensorState = {
+  flex: {
+    left: null,
+    right: null,
+    leftFingers: null,
+    rightFingers: null,
+    normalizedLeft: null,
+    normalizedRight: null,
+    normalizedLeftFingers: null,
+    normalizedRightFingers: null,
+    timestamp: null
+  },
+  imu: {
+    roll: 0,
+    pitch: 0,
+    yaw: 0,
+    timestamp: null
+  }
+};
+const calibrationState = {
+  zero: null,
+  full: null,
+  imuZero: null
+};
 
 function stopMockSource() {
   if (mockTimer) {
@@ -112,6 +145,179 @@ function handleParsedFrame(parsed, { skipBroadcast = false } = {}) {
   }
 
   return parsed;
+}
+
+function normalizeFlexValue(raw, zero, full) {
+  if (typeof raw !== "number" || typeof zero !== "number" || typeof full !== "number" || full === zero) {
+    return null;
+  }
+
+  const normalized = (raw - zero) / (full - zero);
+  return Math.max(0, Math.min(1, Number(normalized.toFixed(3))));
+}
+
+function normalizeFingerArray(rawValues, zeroValues, fullValues) {
+  if (!Array.isArray(rawValues) || !Array.isArray(zeroValues) || !Array.isArray(fullValues)) {
+    return null;
+  }
+
+  return rawValues.map((rawValue, index) =>
+    normalizeFlexValue(rawValue, zeroValues[index], fullValues[index])
+  );
+}
+
+function buildFlexSensorMessage(left, right, leftFingers = null, rightFingers = null) {
+  return {
+    type: "sensor_raw",
+    sensor: "flex",
+    left,
+    right,
+    leftFingers,
+    rightFingers,
+    normalizedLeft: normalizeFlexValue(left, calibrationState.zero?.left, calibrationState.full?.left),
+    normalizedRight: normalizeFlexValue(right, calibrationState.zero?.right, calibrationState.full?.right),
+    normalizedLeftFingers: normalizeFingerArray(
+      leftFingers,
+      calibrationState.zero?.leftFingers,
+      calibrationState.full?.leftFingers
+    ),
+    normalizedRightFingers: normalizeFingerArray(
+      rightFingers,
+      calibrationState.zero?.rightFingers,
+      calibrationState.full?.rightFingers
+    ),
+    timestamp: Date.now()
+  };
+}
+
+function getCurrentSensorSnapshot() {
+  if (!Array.isArray(sensorState.flex.leftFingers) || !Array.isArray(sensorState.flex.rightFingers)) {
+    return null;
+  }
+
+  return {
+    leftFingers: sensorState.flex.leftFingers,
+    rightFingers: sensorState.flex.rightFingers,
+    roll: sensorState.imu.roll,
+    pitch: sensorState.imu.pitch,
+    yaw: sensorState.imu.yaw
+  };
+}
+
+function calculateGestureScore(snapshot, current) {
+  const leftScore = snapshot.leftFingers.reduce((sum, value, index) =>
+    sum + Math.abs(value - (current.leftFingers[index] || 0)), 0);
+  const rightScore = snapshot.rightFingers.reduce((sum, value, index) =>
+    sum + Math.abs(value - (current.rightFingers[index] || 0)), 0);
+  const imuScore =
+    Math.abs(snapshot.roll - current.roll) +
+    Math.abs(snapshot.pitch - current.pitch) +
+    Math.abs(snapshot.yaw - current.yaw);
+
+  return Number(((leftScore + rightScore) / 10 + imuScore * 0.35).toFixed(2));
+}
+
+function maybeBroadcastCustomGestureMatch() {
+  const currentSnapshot = getCurrentSensorSnapshot();
+
+  if (!currentSnapshot) {
+    return;
+  }
+
+  const items = readCustomGestures();
+  if (!items.length) {
+    return;
+  }
+
+  let bestMatch = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+
+  items.forEach((item) => {
+    const score = calculateGestureScore(item.snapshot, currentSnapshot);
+    if (score < bestScore) {
+      bestScore = score;
+      bestMatch = item;
+    }
+  });
+
+  if (!bestMatch || bestScore > 18) {
+    return;
+  }
+
+  const now = Date.now();
+  if (lastCustomGestureMatch.id === bestMatch.id && now - lastCustomGestureMatch.at < 2000) {
+    return;
+  }
+
+  lastCustomGestureMatch = {
+    id: bestMatch.id,
+    at: now
+  };
+
+  broadcast({
+    type: "custom_gesture_match",
+    item: bestMatch,
+    score: bestScore,
+    timestamp: now
+  });
+}
+
+function handleSensorPayload(payload) {
+  if (!payload || payload.type !== "sensor_raw") {
+    return;
+  }
+
+  if (payload.sensor === "flex") {
+    const message = buildFlexSensorMessage(
+      payload.left,
+      payload.right,
+      payload.leftFingers || null,
+      payload.rightFingers || null
+    );
+    sensorState.flex = {
+      left: message.left,
+      right: message.right,
+      leftFingers: message.leftFingers,
+      rightFingers: message.rightFingers,
+      normalizedLeft: message.normalizedLeft,
+      normalizedRight: message.normalizedRight,
+      normalizedLeftFingers: message.normalizedLeftFingers,
+      normalizedRightFingers: message.normalizedRightFingers,
+      timestamp: message.timestamp
+    };
+    broadcast(message);
+    maybeBroadcastCustomGestureMatch();
+    return;
+  }
+
+  if (payload.sensor === "imu") {
+    const adjustedRoll = calibrationState.imuZero
+      ? Number((payload.roll - calibrationState.imuZero.roll).toFixed(2))
+      : payload.roll;
+    const adjustedPitch = calibrationState.imuZero
+      ? Number((payload.pitch - calibrationState.imuZero.pitch).toFixed(2))
+      : payload.pitch;
+    const adjustedYaw = calibrationState.imuZero
+      ? Number((payload.yaw - calibrationState.imuZero.yaw).toFixed(2))
+      : payload.yaw;
+
+    const message = {
+      type: "sensor_raw",
+      sensor: "imu",
+      roll: adjustedRoll,
+      pitch: adjustedPitch,
+      yaw: adjustedYaw,
+      timestamp: Date.now()
+    };
+    sensorState.imu = {
+      roll: message.roll,
+      pitch: message.pitch,
+      yaw: message.yaw,
+      timestamp: message.timestamp
+    };
+    broadcast(message);
+    maybeBroadcastCustomGestureMatch();
+  }
 }
 
 function processIncomingFrame({ source, rawFrame, skipBroadcast = false, skipLog = false }) {
@@ -190,6 +396,153 @@ app.post("/api/parse-frame", (req, res) => {
   res.json({
     ok: true,
     parsed
+  });
+});
+
+app.post("/api/calibration/zero", (_req, res) => {
+  if (typeof sensorState.flex.left !== "number" || typeof sensorState.flex.right !== "number") {
+    return res.status(400).json({
+      ok: false,
+      message: "no flex data available"
+    });
+  }
+
+  calibrationState.zero = {
+    left: sensorState.flex.left,
+    right: sensorState.flex.right,
+    leftFingers: sensorState.flex.leftFingers,
+    rightFingers: sensorState.flex.rightFingers
+  };
+
+  const preview = buildFlexSensorMessage(
+    sensorState.flex.left,
+    sensorState.flex.right,
+    sensorState.flex.leftFingers,
+    sensorState.flex.rightFingers
+  );
+  sensorState.flex.normalizedLeft = preview.normalizedLeft;
+  sensorState.flex.normalizedRight = preview.normalizedRight;
+  sensorState.flex.normalizedLeftFingers = preview.normalizedLeftFingers;
+  sensorState.flex.normalizedRightFingers = preview.normalizedRightFingers;
+
+  return res.json({
+    ok: true,
+    zero: calibrationState.zero,
+    full: calibrationState.full,
+    imuZero: calibrationState.imuZero
+  });
+});
+
+app.post("/api/calibration/full", (_req, res) => {
+  if (typeof sensorState.flex.left !== "number" || typeof sensorState.flex.right !== "number") {
+    return res.status(400).json({
+      ok: false,
+      message: "no flex data available"
+    });
+  }
+
+  calibrationState.full = {
+    left: sensorState.flex.left,
+    right: sensorState.flex.right,
+    leftFingers: sensorState.flex.leftFingers,
+    rightFingers: sensorState.flex.rightFingers
+  };
+
+  const preview = buildFlexSensorMessage(
+    sensorState.flex.left,
+    sensorState.flex.right,
+    sensorState.flex.leftFingers,
+    sensorState.flex.rightFingers
+  );
+  sensorState.flex.normalizedLeft = preview.normalizedLeft;
+  sensorState.flex.normalizedRight = preview.normalizedRight;
+  sensorState.flex.normalizedLeftFingers = preview.normalizedLeftFingers;
+  sensorState.flex.normalizedRightFingers = preview.normalizedRightFingers;
+
+  return res.json({
+    ok: true,
+    zero: calibrationState.zero,
+    full: calibrationState.full,
+    imuZero: calibrationState.imuZero
+  });
+});
+
+app.post("/api/calibration/imu-zero", (_req, res) => {
+  if (typeof sensorState.imu.roll !== "number" || typeof sensorState.imu.pitch !== "number" || typeof sensorState.imu.yaw !== "number") {
+    return res.status(400).json({
+      ok: false,
+      message: "no imu data available"
+    });
+  }
+
+  calibrationState.imuZero = {
+    roll: sensorState.imu.roll,
+    pitch: sensorState.imu.pitch,
+    yaw: sensorState.imu.yaw
+  };
+
+  return res.json({
+    ok: true,
+    imuZero: calibrationState.imuZero
+  });
+});
+
+app.get("/api/custom-gestures", (_req, res) => {
+  res.json({
+    ok: true,
+    items: readCustomGestures()
+  });
+});
+
+app.post("/api/custom-gestures", (req, res) => {
+  const { name, category, action, snapshot } = req.body || {};
+
+  if (!name || !category || !action || !snapshot) {
+    return res.status(400).json({
+      ok: false,
+      message: "name, category, action, snapshot are required"
+    });
+  }
+
+  if (!Array.isArray(snapshot.leftFingers) || snapshot.leftFingers.length !== 5 ||
+      !Array.isArray(snapshot.rightFingers) || snapshot.rightFingers.length !== 5) {
+    return res.status(400).json({
+      ok: false,
+      message: "snapshot must contain 5 left fingers and 5 right fingers"
+    });
+  }
+
+  const item = createCustomGesture({
+    name: String(name).trim(),
+    category: String(category).trim(),
+    action: String(action).trim(),
+    snapshot: {
+      leftFingers: snapshot.leftFingers.map((value) => Number(value) || 0),
+      rightFingers: snapshot.rightFingers.map((value) => Number(value) || 0),
+      roll: Number(snapshot.roll) || 0,
+      pitch: Number(snapshot.pitch) || 0,
+      yaw: Number(snapshot.yaw) || 0
+    }
+  });
+
+  return res.json({
+    ok: true,
+    item
+  });
+});
+
+app.delete("/api/custom-gestures/:id", (req, res) => {
+  const removed = deleteCustomGesture(req.params.id);
+
+  if (!removed) {
+    return res.status(404).json({
+      ok: false,
+      message: "custom gesture not found"
+    });
+  }
+
+  return res.json({
+    ok: true
   });
 });
 
@@ -290,6 +643,30 @@ function buildMockGestureFrame(message) {
   return `GESTURE:ID=${message.gesture},CONF=${message.confidence},HOLD=${message.holdMs}`;
 }
 
+function buildMockSensorPayloads() {
+  const tick = Math.floor(Date.now() / 1000);
+  const leftFingers = [18, 31, 44, 57, 70].map((base, index) => base + ((tick + index * 2) % 16));
+  const rightFingers = [24, 38, 52, 66, 80].map((base, index) => base + ((tick + index * 3) % 14));
+
+  return [
+    {
+      type: "sensor_raw",
+      sensor: "flex",
+      left: leftFingers.reduce((sum, value) => sum + value, 0),
+      right: rightFingers.reduce((sum, value) => sum + value, 0),
+      leftFingers,
+      rightFingers
+    },
+    {
+      type: "sensor_raw",
+      sensor: "imu",
+      roll: Number((Math.sin(tick / 3) * 22).toFixed(2)),
+      pitch: Number((Math.cos(tick / 4) * 16).toFixed(2)),
+      yaw: Number(((tick * 9) % 360).toFixed(2))
+    }
+  ];
+}
+
 function startMockSource() {
   stopMockSource();
   console.log("[bridge] input source=mock");
@@ -306,6 +683,10 @@ function startMockSource() {
   mockTimer = setInterval(() => {
     const message = nextMockMessage();
     broadcast(message);
+
+    buildMockSensorPayloads().forEach((payload) => {
+      handleSensorPayload(payload);
+    });
 
     if (message.type === "gesture") {
       processIncomingFrame({
@@ -342,6 +723,13 @@ async function startSerialSource() {
         });
       },
       onLine: (line) => {
+        const sensorPayload = parseSensorPayload(line);
+
+        if (sensorPayload) {
+          handleSensorPayload(sensorPayload);
+          return;
+        }
+
         const normalizedFrame = normalizeSerialFrame(line);
 
         if (!normalizedFrame) {

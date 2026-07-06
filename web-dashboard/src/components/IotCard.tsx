@@ -1,6 +1,6 @@
 ﻿import { AlertOctagon, Fan, Lightbulb, PlugZap } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import React, { useState } from "react";
+import React from "react";
 
 type DeviceKey = "light" | "fan" | "socket" | "sos";
 
@@ -27,21 +27,12 @@ const DeviceButton: React.FC<DeviceButtonProps> = ({ label, hint, active, icon: 
   </button>
 );
 
-export const IotCard: React.FC = () => {
-  const [devices, setDevices] = useState<Record<DeviceKey, boolean>>({
-    light: false,
-    fan: false,
-    socket: false,
-    sos: false
-  });
+interface Props {
+  devices: Record<DeviceKey, boolean>;
+  onToggle: (key: DeviceKey) => void;
+}
 
-  const toggleDevice = (key: DeviceKey) => {
-    setDevices((previous) => ({
-      ...previous,
-      [key]: !previous[key]
-    }));
-  };
-
+export const IotCard: React.FC<Props> = ({ devices, onToggle }) => {
   return (
     <section className="panel">
       <h2 className="panel-title">
@@ -59,7 +50,7 @@ export const IotCard: React.FC = () => {
           hint="本地按钮状态切换"
           active={devices.light}
           icon={Lightbulb}
-          onClick={() => toggleDevice("light")}
+          onClick={() => onToggle("light")}
           activeClassName="border-amber-300/30 bg-amber-300/15 text-amber-100"
         />
         <DeviceButton
@@ -67,7 +58,7 @@ export const IotCard: React.FC = () => {
           hint="模拟家电开合状态"
           active={devices.fan}
           icon={Fan}
-          onClick={() => toggleDevice("fan")}
+          onClick={() => onToggle("fan")}
           activeClassName="border-sky-300/30 bg-sky-300/15 text-sky-100"
         />
         <DeviceButton
@@ -75,7 +66,7 @@ export const IotCard: React.FC = () => {
           hint="演示远控开闭操作"
           active={devices.socket}
           icon={PlugZap}
-          onClick={() => toggleDevice("socket")}
+          onClick={() => onToggle("socket")}
           activeClassName="border-emerald-300/30 bg-emerald-300/15 text-emerald-100"
         />
         <DeviceButton
@@ -83,7 +74,7 @@ export const IotCard: React.FC = () => {
           hint="切换本地告警状态"
           active={devices.sos}
           icon={AlertOctagon}
-          onClick={() => toggleDevice("sos")}
+          onClick={() => onToggle("sos")}
           activeClassName="border-rose-300/30 bg-rose-400 text-white"
         />
       </div>

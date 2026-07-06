@@ -47,6 +47,104 @@ function normalizeControlFrame(parts) {
   return `CTRL:DEV=${normalizedDevice},ACT=${normalizedAction}`;
 }
 
+function parseKeyValuePart(part) {
+  const [key, rawValue] = part.split("=");
+
+  if (!key || typeof rawValue === "undefined") {
+    return null;
+  }
+
+  const value = Number(rawValue.trim());
+
+  if (Number.isNaN(value)) {
+    return null;
+  }
+
+  return {
+    key: key.trim(),
+    value
+  };
+}
+
+function parseFlexPayload(parts) {
+  const fingerValues = {
+    left: Array(5).fill(null),
+    right: Array(5).fill(null)
+  };
+  let matchedFingerCount = 0;
+
+  for (let index = 1; index < parts.length; index += 1) {
+    const parsedPart = parseKeyValuePart(parts[index] || "");
+
+    if (!parsedPart) {
+      continue;
+    }
+
+    const leftMatch = /^L([1-5])$/.exec(parsedPart.key);
+    const rightMatch = /^R([1-5])$/.exec(parsedPart.key);
+
+    if (leftMatch) {
+      fingerValues.left[Number(leftMatch[1]) - 1] = parsedPart.value;
+      matchedFingerCount += 1;
+      continue;
+    }
+
+    if (rightMatch) {
+      fingerValues.right[Number(rightMatch[1]) - 1] = parsedPart.value;
+      matchedFingerCount += 1;
+    }
+  }
+
+  if (
+    matchedFingerCount === 10 &&
+    fingerValues.left.every((value) => typeof value === "number") &&
+    fingerValues.right.every((value) => typeof value === "number")
+  ) {
+    return {
+      type: "sensor_raw",
+      sensor: "flex",
+      left: fingerValues.left.reduce((sum, value) => sum + value, 0),
+      right: fingerValues.right.reduce((sum, value) => sum + value, 0),
+      leftFingers: fingerValues.left,
+      rightFingers: fingerValues.right
+    };
+  }
+
+  const leftPart = parseKeyValuePart(parts[1] || "");
+  const rightPart = parseKeyValuePart(parts[2] || "");
+
+  if (leftPart?.key !== "L" || rightPart?.key !== "R") {
+    return null;
+  }
+
+  return {
+    type: "sensor_raw",
+    sensor: "flex",
+    left: leftPart.value,
+    right: rightPart.value,
+    leftFingers: null,
+    rightFingers: null
+  };
+}
+
+function parseImuPayload(parts) {
+  const rollPart = parseKeyValuePart(parts[1] || "");
+  const pitchPart = parseKeyValuePart(parts[2] || "");
+  const yawPart = parseKeyValuePart(parts[3] || "");
+
+  if (rollPart?.key !== "R" || pitchPart?.key !== "P" || yawPart?.key !== "Y") {
+    return null;
+  }
+
+  return {
+    type: "sensor_raw",
+    sensor: "imu",
+    roll: rollPart.value,
+    pitch: pitchPart.value,
+    yaw: yawPart.value
+  };
+}
+
 function normalizeSerialFrame(rawLine) {
   if (typeof rawLine !== "string") {
     return null;
@@ -79,6 +177,31 @@ function normalizeSerialFrame(rawLine) {
 
   if (frameType === "CTRL") {
     return normalizeControlFrame(parts);
+  }
+
+  return null;
+}
+
+function parseSensorPayload(rawLine) {
+  if (typeof rawLine !== "string") {
+    return null;
+  }
+
+  const line = rawLine.trim();
+
+  if (!line) {
+    return null;
+  }
+
+  const parts = line.split("|").map((part) => part.trim());
+  const frameType = parts[0];
+
+  if (frameType === "FLEX") {
+    return parseFlexPayload(parts);
+  }
+
+  if (frameType === "IMU") {
+    return parseImuPayload(parts);
   }
 
   return null;
@@ -162,5 +285,6 @@ async function openSerialInput({
 
 module.exports = {
   normalizeSerialFrame,
+  parseSensorPayload,
   openSerialInput
 };

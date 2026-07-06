@@ -4,9 +4,11 @@ import {
   BridgeMessage,
   BridgeStatus,
   CareMessage,
+  CustomGestureMatchMessage,
   GESTURE_MAP,
   GestureMessage,
   GestureType,
+  SensorRawMessage,
   SignMessage,
   SystemMessage
 } from "../types";
@@ -20,7 +22,9 @@ export const useWebSocket = () => {
   const [lastSignMessage, setLastSignMessage] = useState<SignMessage | null>(null);
   const [lastCareMessage, setLastCareMessage] = useState<CareMessage | null>(null);
   const [lastAiFeedbackMessage, setLastAiFeedbackMessage] = useState<AiFeedbackMessage | null>(null);
+  const [lastCustomGestureMatchMessage, setLastCustomGestureMatchMessage] = useState<CustomGestureMatchMessage | null>(null);
   const [lastSystemMessage, setLastSystemMessage] = useState<SystemMessage | null>(null);
+  const [lastSensorRawMessage, setLastSensorRawMessage] = useState<SensorRawMessage | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
 
@@ -61,6 +65,16 @@ export const useWebSocket = () => {
 
       if (message.type === "ai_feedback") {
         setLastAiFeedbackMessage(message);
+        return;
+      }
+
+      if (message.type === "sensor_raw") {
+        setLastSensorRawMessage(message);
+        return;
+      }
+
+      if (message.type === "custom_gesture_match") {
+        setLastCustomGestureMatchMessage(message);
         return;
       }
 
@@ -161,6 +175,8 @@ export const useWebSocket = () => {
     lastSignMessage,
     lastCareMessage,
     lastAiFeedbackMessage,
+    lastCustomGestureMatchMessage,
+    lastSensorRawMessage,
     lastSystemMessage,
     simulateWebSocketMessage,
     sendBridgeMessage

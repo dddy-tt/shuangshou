@@ -54,7 +54,30 @@ export interface AiFeedbackMessage {
   timestamp: number;
 }
 
-export type BridgeMessage = GestureMessage | SignMessage | CareMessage | SystemMessage | AiFeedbackMessage;
+export interface FlexSensorMessage {
+  type: "sensor_raw";
+  sensor: "flex";
+  left: number;
+  right: number;
+  leftFingers: number[] | null;
+  rightFingers: number[] | null;
+  normalizedLeft: number | null;
+  normalizedRight: number | null;
+  normalizedLeftFingers: Array<number | null> | null;
+  normalizedRightFingers: Array<number | null> | null;
+  timestamp: number;
+}
+
+export interface ImuSensorMessage {
+  type: "sensor_raw";
+  sensor: "imu";
+  roll: number;
+  pitch: number;
+  yaw: number;
+  timestamp: number;
+}
+
+export type SensorRawMessage = FlexSensorMessage | ImuSensorMessage;
 export type WSMessage = GestureMessage;
 
 export interface TrainingRecord {
@@ -89,6 +112,41 @@ export interface CareMonitoringState {
   sosActive: boolean;
   reminder: string;
 }
+
+export type CustomGestureCategory = "translation" | "control" | "training";
+
+export interface CustomGestureSnapshot {
+  leftFingers: number[];
+  rightFingers: number[];
+  roll: number;
+  pitch: number;
+  yaw: number;
+}
+
+export interface CustomGestureItem {
+  id: string;
+  name: string;
+  category: CustomGestureCategory;
+  action: string;
+  snapshot: CustomGestureSnapshot;
+  createdAt: number;
+}
+
+export interface CustomGestureMatchMessage {
+  type: "custom_gesture_match";
+  item: CustomGestureItem;
+  score: number;
+  timestamp: number;
+}
+
+export type BridgeMessage =
+  | GestureMessage
+  | SignMessage
+  | CareMessage
+  | SystemMessage
+  | AiFeedbackMessage
+  | SensorRawMessage
+  | CustomGestureMatchMessage;
 
 export const GESTURE_MAP: Record<GestureType, string> = {
   RIGHT_OPEN: "右手张开",
