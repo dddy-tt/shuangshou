@@ -309,6 +309,7 @@ int main(void)
     /* 任务 5：100ms / 10Hz，模式切换 + 蓝牙指令 + PPG 批处理 */
     if (now - t_100ms >= 100U) {
         t_100ms = now;
+        char bt_line[BT_RX_BUF_SIZE];
 
         /* 保持双手全弯 3 秒切换模式，并播放模式提示音 */
         {
@@ -364,6 +365,25 @@ int main(void)
             break;
         default:
             break;
+        }
+
+        if (BT_FetchLastString(bt_line, sizeof(bt_line))) {
+            uint16_t file_num = 0U;
+            unsigned volume = 0U;
+
+            if (sscanf(bt_line, "<DF:PLAY=%hu>", &file_num) == 1) {
+                DFPlayer_Play(file_num);
+                BT_SendString("DF:PLAY OK\r\n");
+            } else if (strstr(bt_line, "<DF:STOP>")) {
+                DFPlayer_Stop();
+                BT_SendString("DF:STOP OK\r\n");
+            } else if (sscanf(bt_line, "<DF:VOL=%u>", &volume) == 1) {
+                if (volume > 30U) {
+                    volume = 30U;
+                }
+                DFPlayer_SetVolume((uint8_t)volume);
+                BT_SendString("DF:VOL OK\r\n");
+            }
         }
 
         /* MAX30102 批处理与生命体征告警 */

@@ -50,7 +50,7 @@
  * @note  0x3A(GxL)~0x3F(GzH), 6 字节连续, 每轴 16-bit 小端
  *        量程 ±2000°/s, 分辨率 1/32768 × 2000°/s
  */
-#define JY61P_REG_GX_L      0x3AU
+#define JY61P_REG_GX_L      0x37U
 
 /**
  * @brief 欧拉角起始寄存器
@@ -80,9 +80,9 @@
  *        Byte[0..1]:  Ax (0x34-0x35)
  *        Byte[2..3]:  Ay (0x36-0x37)
  *        Byte[4..5]:  Az (0x38-0x39)
- *        Byte[6..7]:  Gx (0x3A-0x3B)
- *        Byte[8..9]:  Gy (0x3C-0x3D)
- *        Byte[10..11]: Gz (0x3E-0x3F)
+ *        Byte[6..7]:  Gx (0x37-0x38)
+ *        Byte[8..9]:  Gy (0x39-0x3A)
+ *        Byte[10..11]: Gz (0x3B-0x3C)
  */
 #define JY61P_BURST_ACC_GYRO_LEN  12U
 

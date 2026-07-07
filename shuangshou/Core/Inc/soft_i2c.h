@@ -61,4 +61,12 @@ SI2C_Status_t SoftI2C_ReadBuf(SI2C_Dev_t dev, uint8_t dev_addr,
 SI2C_Status_t SoftI2C_WriteByte(SI2C_Dev_t dev, uint8_t dev_addr,
                                 uint8_t reg_addr, uint8_t data);
 
+/*
+ * Minimal diagnostic helper:
+ *   0 = device address ACK + register address ACK
+ *   1 = device address NACK
+ *   2 = register address NACK
+ */
+uint8_t SoftI2C_ProbeReg(SI2C_Dev_t dev, uint8_t dev_addr, uint8_t reg_addr);
+
 #endif /* __SOFT_I2C_H */

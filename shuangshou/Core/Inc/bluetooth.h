@@ -44,4 +44,10 @@ uint8_t BT_GetCommand(void);
  */
 const char *BT_GetLastString(void);
 
+/*
+ * 取走最近一条字符串命令，取走后内部缓存清空
+ * 返回 1 = 成功取到，0 = 当前没有新字符串命令
+ */
+uint8_t BT_FetchLastString(char *out, uint16_t out_len);
+
 #endif /* __BLUETOOTH_H */

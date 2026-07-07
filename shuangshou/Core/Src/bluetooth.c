@@ -1,4 +1,4 @@
-#include "bluetooth.h"
+﻿#include "bluetooth.h"
 #include "usart.h"
 #include "string.h"
 
@@ -10,11 +10,11 @@ static uint16_t rx_tail = 0;
 
 static uint8_t  cmd_pending = BT_CMD_NONE;
 
-/* 字符串命令缓冲 */
 static char    str_buf[BT_RX_BUF_SIZE];
 static uint8_t str_idx = 0;
 
 static char    last_string[BT_RX_BUF_SIZE];
+static uint8_t last_string_valid = 0;
 
 void BT_Init(void)
 {
@@ -25,6 +25,7 @@ void BT_Init(void)
     rx_tail = 0;
     str_idx = 0;
     cmd_pending = BT_CMD_NONE;
+    last_string_valid = 0;
 }
 
 void BT_SendString(const char *str)
@@ -39,22 +40,18 @@ void BT_SendRaw(const uint8_t *data, uint16_t len)
     HAL_UART_Transmit(&huart3, (uint8_t *)data, len, 100);
 }
 
-/* ── 接收中断回调 ── */
 void BT_RxCallback(uint8_t byte)
 {
-    /* 存入环形缓冲 */
     uint16_t next = (rx_head + 1) % BT_RX_BUF_SIZE;
     if (next != rx_tail) {
         rx_ring[rx_head] = byte;
         rx_head = next;
     }
 
-    /* ── 单字符指令（灵敏度控制） ── */
     if (byte >= '1' && byte <= '3') {
         cmd_pending = BT_CMD_SENS_1 + (byte - '1');
     }
 
-    /* ── 字符串模式聚合 ── */
     if (str_idx < (BT_RX_BUF_SIZE - 1U)) {
         str_buf[str_idx++] = (char)byte;
     } else {
@@ -71,9 +68,9 @@ void BT_RxCallback(uint8_t byte)
         } else if (strstr(str_buf, "<CAL:MAX>")) {
             cmd_pending = BT_CMD_CAL_MAX;
         } else {
-            /* 非标定指令，保存为自定义字符串 */
             strncpy(last_string, str_buf, BT_RX_BUF_SIZE - 1U);
             last_string[BT_RX_BUF_SIZE - 1U] = '\0';
+            last_string_valid = 1;
         }
         memset(str_buf, 0, BT_RX_BUF_SIZE);
     }
@@ -89,4 +86,25 @@ uint8_t BT_GetCommand(void)
 const char *BT_GetLastString(void)
 {
     return last_string;
+}
+
+uint8_t BT_FetchLastString(char *out, uint16_t out_len)
+{
+    uint16_t copy_len;
+
+    if (!out || out_len == 0U || !last_string_valid) {
+        return 0U;
+    }
+
+    copy_len = (uint16_t)strlen(last_string);
+    if (copy_len >= out_len) {
+        copy_len = out_len - 1U;
+    }
+
+    memcpy(out, last_string, copy_len);
+    out[copy_len] = '\0';
+
+    last_string[0] = '\0';
+    last_string_valid = 0;
+    return 1U;
 }
