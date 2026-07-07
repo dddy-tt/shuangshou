@@ -35,6 +35,11 @@ void BringupDiag_SetMAX30102PartId(uint8_t part_id)
     g_bringup_diag.max_part_id = part_id;
 }
 
+void BringupDiag_SetMAX30102HalErr(uint8_t hal_err)
+{
+    g_bringup_diag.max_hal_err = hal_err;
+}
+
 void BringupDiag_SetADCSeen(uint8_t adc1_seen, uint8_t adc2_seen)
 {
     g_bringup_diag.adc1_seen = adc1_seen ? 1U : 0U;
@@ -67,7 +72,7 @@ uint8_t BringupDiag_TrySend(UART_HandleTypeDef *huart)
     }
 
     len = snprintf(g_bringup_line, sizeof(g_bringup_line),
-                   "BRINGUP: JY_R=%u,JY_L=%u,JY_R_RET=%u,JY_L_RET=%u,MAX=%u,MAX_RET=%u,MAX_PART=0x%02X,ADC1=%u,ADC2=%u,DEG=%u\r\n",
+                   "BRINGUP: JY_R=%u,JY_L=%u,JY_R_RET=%u,JY_L_RET=%u,MAX=%u,MAX_RET=%u,MAX_PART=0x%02X,MAX_HAL_ERR=%d,ADC1=%u,ADC2=%u,DEG=%u\r\n",
                    g_bringup_diag.jy_right_ok,
                    g_bringup_diag.jy_left_ok,
                    g_bringup_diag.jy_right_ret,
@@ -75,6 +80,7 @@ uint8_t BringupDiag_TrySend(UART_HandleTypeDef *huart)
                    g_bringup_diag.max_ok,
                    g_bringup_diag.max_ret,
                    g_bringup_diag.max_part_id,
+                   (int8_t)g_bringup_diag.max_hal_err,
                    g_bringup_diag.adc1_seen,
                    g_bringup_diag.adc2_seen,
                    g_bringup_diag.degraded);

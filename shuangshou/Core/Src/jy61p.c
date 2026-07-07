@@ -1,5 +1,5 @@
-﻿#include "jy61p.h"
-#include "soft_i2c.h"
+#include "jy61p.h"
+#include "i2c.h"
 #include "string.h"
 
 #define JY61P_REG_ACC_START     JY61P_REG_AX_L
@@ -10,9 +10,12 @@
 JY61P_Data_t JY61P_Right;
 JY61P_Data_t JY61P_Left;
 
-static SI2C_Dev_t channel_to_dev(uint8_t channel)
+/* 8-bit I2C address for HAL (HAL expects address << 1 format) */
+#define JY61P_ADDR_HAL          JY61P_I2C_ADDR  /* 0xA0 */
+
+static I2C_HandleTypeDef *channel_to_hi2c(uint8_t channel)
 {
-    return (channel == JY61P_CH_RIGHT) ? SI2C_MPU_RIGHT : SI2C_MPU_LEFT;
+    return (channel == JY61P_CH_RIGHT) ? &hi2c1 : &hi2c2;
 }
 
 static JY61P_Data_t *data_of(uint8_t channel)
@@ -40,13 +43,14 @@ static float jy61p_scale_angle(int16_t raw)
     return ((float)raw / 32768.0f) * 180.0f;
 }
 
-static uint8_t jy61p_read_vector(SI2C_Dev_t dev, uint8_t reg_start, int16_t out_raw[3])
+static uint8_t jy61p_read_vector(I2C_HandleTypeDef *hi2c, uint8_t reg_start, int16_t out_raw[3])
 {
     uint8_t buf[JY61P_VECTOR_LEN];
-    SI2C_Status_t st;
+    HAL_StatusTypeDef st;
 
-    st = SoftI2C_ReadBuf(dev, JY61P_I2C_ADDR, reg_start, buf, JY61P_VECTOR_LEN);
-    if (st != SI2C_OK) {
+    st = HAL_I2C_Mem_Read(hi2c, JY61P_ADDR_HAL, reg_start,
+                          I2C_MEMADD_SIZE_8BIT, buf, JY61P_VECTOR_LEN, 100);
+    if (st != HAL_OK) {
         return 1U;
     }
 
@@ -97,33 +101,32 @@ static void jy61p_publish_angle(JY61P_Data_t *data, float *angle)
 
 uint8_t JY61P_Init(uint8_t channel)
 {
-    SI2C_Dev_t dev = channel_to_dev(channel);
+    I2C_HandleTypeDef *hi2c = channel_to_hi2c(channel);
     JY61P_Data_t *data = data_of(channel);
-    uint8_t probe_ret;
 
     memset(data, 0, sizeof(JY61P_Data_t));
 
-    probe_ret = SoftI2C_ProbeReg(dev, JY61P_I2C_ADDR, JY61P_REG_ANGLE_START);
-    if (probe_ret == 1U) {
-        data->online = 0U;
-        return 1U;
-    }
-    if (probe_ret == 2U) {
-        data->online = 0U;
-        return 2U;
+    /* Probe with retry: JY61P may not be ready right after power-on. */
+    {
+        uint8_t probe_buf[2];
+        HAL_StatusTypeDef pst;
+        uint8_t try = 0;
+        do {
+            pst = HAL_I2C_Mem_Read(hi2c, JY61P_ADDR_HAL, JY61P_REG_ROLL_L,
+                                   I2C_MEMADD_SIZE_8BIT, probe_buf, 2, 100);
+            if (pst == HAL_OK) break;
+            HAL_Delay(100);
+        } while (++try < 5);
+        if (pst != HAL_OK) {
+            data->online = 0U;
+            return 1U;
+        }
     }
 
-    if (jy61p_read_vector(dev, JY61P_REG_ANGLE_START, data->angle_raw) != 0U) {
-        data->online = 0U;
-        return 3U;
-    }
-
-    if ((data->angle_raw[0] == 0) &&
-        (data->angle_raw[1] == 0) &&
-        (data->angle_raw[2] == 0)) {
-        data->online = 0U;
-        return 4U;
-    }
+    /* Read initial angle — skip all-zero check because JY61P may still be
+     * settling after power-on.  The 200Hz runtime task will pick up live
+     * data regardless. */
+    (void)jy61p_read_vector(hi2c, JY61P_REG_ANGLE_START, data->angle_raw);
 
     jy61p_publish_angle(data, 0);
     data->online = 1U;
@@ -132,23 +135,23 @@ uint8_t JY61P_Init(uint8_t channel)
 
 uint8_t JY61P_Read_Data(uint8_t channel, float *acc, float *gyro, float *angle)
 {
-    SI2C_Dev_t dev = channel_to_dev(channel);
+    I2C_HandleTypeDef *hi2c = channel_to_hi2c(channel);
     JY61P_Data_t *data = data_of(channel);
     uint8_t err = 0U;
 
-    if (jy61p_read_vector(dev, JY61P_REG_ACC_START, data->acc_raw) != 0U) {
+    if (jy61p_read_vector(hi2c, JY61P_REG_ACC_START, data->acc_raw) != 0U) {
         err |= 1U;
     } else {
         jy61p_publish_acc(data, acc);
     }
 
-    if (jy61p_read_vector(dev, JY61P_REG_GYRO_START, data->gyro_raw) != 0U) {
+    if (jy61p_read_vector(hi2c, JY61P_REG_GYRO_START, data->gyro_raw) != 0U) {
         err |= 2U;
     } else {
         jy61p_publish_gyro(data, gyro);
     }
 
-    if (jy61p_read_vector(dev, JY61P_REG_ANGLE_START, data->angle_raw) != 0U) {
+    if (jy61p_read_vector(hi2c, JY61P_REG_ANGLE_START, data->angle_raw) != 0U) {
         err |= 4U;
     } else {
         jy61p_publish_angle(data, angle);
@@ -160,10 +163,10 @@ uint8_t JY61P_Read_Data(uint8_t channel, float *acc, float *gyro, float *angle)
 
 uint8_t JY61P_Read_Angle(uint8_t channel, float *roll, float *pitch, float *yaw)
 {
+    I2C_HandleTypeDef *hi2c = channel_to_hi2c(channel);
     JY61P_Data_t *data = data_of(channel);
-    SI2C_Dev_t dev = channel_to_dev(channel);
 
-    if (jy61p_read_vector(dev, JY61P_REG_ANGLE_START, data->angle_raw) != 0U) {
+    if (jy61p_read_vector(hi2c, JY61P_REG_ANGLE_START, data->angle_raw) != 0U) {
         data->online = 0U;
         return 1U;
     }
@@ -171,15 +174,9 @@ uint8_t JY61P_Read_Angle(uint8_t channel, float *roll, float *pitch, float *yaw)
     jy61p_publish_angle(data, 0);
     data->online = 1U;
 
-    if (roll != 0) {
-        *roll = data->angle[0];
-    }
-    if (pitch != 0) {
-        *pitch = data->angle[1];
-    }
-    if (yaw != 0) {
-        *yaw = data->angle[2];
-    }
+    if (roll != 0)  *roll = data->angle[0];
+    if (pitch != 0) *pitch = data->angle[1];
+    if (yaw != 0)   *yaw = data->angle[2];
 
     return 0U;
 }
@@ -193,13 +190,7 @@ void JY61P_GetLastAngle(uint8_t channel, float *roll, float *pitch, float *yaw)
 {
     JY61P_Data_t *data = data_of(channel);
 
-    if (roll != 0) {
-        *roll = data->angle[0];
-    }
-    if (pitch != 0) {
-        *pitch = data->angle[1];
-    }
-    if (yaw != 0) {
-        *yaw = data->angle[2];
-    }
+    if (roll != 0)  *roll = data->angle[0];
+    if (pitch != 0) *pitch = data->angle[1];
+    if (yaw != 0)   *yaw = data->angle[2];
 }

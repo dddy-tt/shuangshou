@@ -530,6 +530,11 @@
               <FileType>1</FileType>
               <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_uart.c</FilePath>
             </File>
+            <File>
+              <FileName>stm32f4xx_hal_i2c.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../Drivers/STM32F4xx_HAL_Driver/Src/stm32f4xx_hal_i2c.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -574,6 +579,11 @@
               <FileName>soft_i2c.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Core\Src\soft_i2c.c</FilePath>
+            </File>
+            <File>
+              <FileName>i2c.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\i2c.c</FilePath>
             </File>
             <File>
               <FileName>vibrator.c</FileName>

@@ -29,7 +29,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "soft_i2c.h"
+#include "i2c.h"
 #include "flex_sensor.h"
 #include "jy61p.h"
 #include "dfplayer.h"
@@ -138,6 +138,9 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
+  MX_I2C1_Init();
+  MX_I2C2_Init();
+  MX_I2C3_Init();
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
   MX_ADC1_Init();
@@ -152,7 +155,6 @@ int main(void)
   BringupDiag_Init();
 
   /* 阶段 1：基础通信与采样链路初始化 */
-  SoftI2C_Init();      /* 三路软 I2C 总线复位并确认空闲 */
   Flex_Init();         /* 柔性传感器极值/方向初始化 */
 
   /* 阶段 2：启动 ADC DMA 循环扫描（双 ADC 独立 DMA） */
@@ -199,6 +201,7 @@ int main(void)
 
   /* 阶段 6：启动 UART3 单字节中断接收 */
   HAL_UART_Receive_IT(&huart3, (uint8_t *)&uart3_rx_byte, 1);
+  BT_SendString("BOOT:C63AFB5\r\n");
 
   /* 上电提示：播放启动音并短振双手 */
   DFPlayer_Play(99);  /* 99.mp3 = 开机提示音 */
