@@ -1,5 +1,27 @@
 # Mini Program Progress
 
+## 2026-09-23 - 微信小程序虚拟手套测试系统
+
+### 已完成
+
+- 新增 `miniprogram/services/simulator.js`：只生成当前协议定义的 `BOOT`、`BRINGUP`、`JY`、`FLEX`、`IMU`、`ACC` 文本帧，并以 `ArrayBuffer` 输入共享 `protocol.js` 解析器。
+- `app-state` 新增 Simulator 生命周期和受控接口；模拟源不会调用 BLE，也不会伪造 `connected=true`。正式翻译、康复、远控和手势库继续读取同一份共享解析状态。
+- 新增非 TabBar 开发页 `pages/simulator`，支持十指、Roll/Pitch/Yaw、ACC 三轴滑杆、单次注入、连续模拟、全部伸直/半弯/全弯/混合/正常静止预设。
+- 设置页只在微信开发者工具环境显示 Simulator 入口；比赛与真机正式导航不显示该入口。
+- 新增 JSON 案例接口与示例 `miniprogram/test/cases/hello.json`，后续 PC 自动化可经 `runtime.loadSimulatorCase()` 注入，而不需要真实手套。
+- 新增 `simulator.test.js` 与 `simulator-page.test.js`，覆盖真实 parser 分包、十指状态阈值、app-state、IMU/ACC、JY 健康帧、BLE 隔离、停止生命周期和页面注册关系。
+
+### 本轮验证
+
+- `node --test miniprogram/test/*.test.js`：28/28 通过，0 失败。
+- 新增 Simulator 定向测试通过。
+- 新增/修改 JavaScript 的 `node --check` 通过；全部 JSON 可解析。
+
+### 真机/工具待验证
+
+- 仍需在微信开发者工具实际打开“设备状态 → 开发测试 → 虚拟手套控制台”，验证 WXML/WXSS、滑杆和跨页刷新。
+- 本轮未修改、编译或烧录 STM32；未替代 JDY-23、FFE1 Notify、真机 TTS 或实际传感器验证。
+
 ## 2026-09-22 - 数据流恢复、JY61P 防零与报警闭环修复（当前）
 
 ### 已完成

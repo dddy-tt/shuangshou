@@ -1,0 +1,49 @@
+<view class="screen">
+  <view class="page-head">
+    <view>
+      <view class="eyebrow">DEVELOPMENT ONLY</view>
+      <view class="page-title">虚拟手套控制台</view>
+      <view class="page-copy">生成与 STM32 相同的文本帧，经共享协议解析器进入正式页面；不会连接或伪造 BLE。</view>
+    </view>
+    <status-badge tone="{{tone}}" text="{{sourceLabel}}" />
+  </view>
+
+  <view class="notice notice-warning">这是微信开发者工具测试入口。模拟 FLEX、IMU、ACC 数据会进入翻译、康复和手势匹配；不会直接设置识别结果。</view>
+
+  <view class="card">
+    <section-header title="测试预设" copy="预设只改变传感器输入，手势识别仍由现有 matcher 自行计算。" />
+    <view class="preset-grid">
+      <button wx:for="{{presets}}" wx:key="key" class="quiet-button preset-button" data-preset="{{item.key}}" bindtap="applyPreset">{{item.label}}</button>
+    </view>
+  </view>
+
+  <view class="card">
+    <section-header title="连续数据流" copy="启动后每 250ms 注入 FLEX / IMU / ACC，健康状态帧每秒补发一次。" />
+    <view class="button-row">
+      <button class="primary-button" bindtap="toggleContinuous">{{simulator.running ? '停止连续模拟' : '开始连续模拟'}}</button>
+      <button class="secondary-button" bindtap="injectOnce">立即注入一次</button>
+    </view>
+  </view>
+
+  <view class="card">
+    <section-header title="十指 FLEX" copy="0–29 为平直，30–69 为半弯，70–100 为全弯。拖动后立即经过真实 parser 更新正式页面。" />
+    <view wx:for="{{fingers}}" wx:key="index" class="control-row">
+      <view class="control-meta"><text class="control-label">{{item.label}}</text><text class="control-value">{{item.value}}</text></view>
+      <slider min="0" max="100" step="1" value="{{item.value}}" activeColor="#116b5a" backgroundColor="#e3e8e5" data-index="{{item.index}}" bindchanging="updateFinger" bindchange="updateFinger" />
+    </view>
+  </view>
+
+  <view class="card">
+    <section-header title="IMU 姿态" copy="Roll、Pitch 范围 -180 到 180°；Yaw 范围 -360 到 360°。" />
+    <view class="control-row"><view class="control-meta"><text class="control-label">Roll</text><text class="control-value">{{imu.roll}}°</text></view><slider min="-180" max="180" step="1" value="{{imu.roll}}" activeColor="#116b5a" backgroundColor="#e3e8e5" data-axis="roll" bindchanging="updateImu" bindchange="updateImu" /></view>
+    <view class="control-row"><view class="control-meta"><text class="control-label">Pitch</text><text class="control-value">{{imu.pitch}}°</text></view><slider min="-180" max="180" step="1" value="{{imu.pitch}}" activeColor="#116b5a" backgroundColor="#e3e8e5" data-axis="pitch" bindchanging="updateImu" bindchange="updateImu" /></view>
+    <view class="control-row"><view class="control-meta"><text class="control-label">Yaw</text><text class="control-value">{{imu.yaw}}°</text></view><slider min="-360" max="360" step="1" value="{{imu.yaw}}" activeColor="#116b5a" backgroundColor="#e3e8e5" data-axis="yaw" bindchanging="updateImu" bindchange="updateImu" /></view>
+  </view>
+
+  <view class="card">
+    <section-header title="ACC 加速度" copy="单位 g，滑杆步进 0.1g；本阶段仅模拟有效状态帧，不生成虚假跌倒或抽搐报警。" />
+    <view class="control-row"><view class="control-meta"><text class="control-label">ACC X</text><text class="control-value">{{acc.x / 10}}g</text></view><slider min="-40" max="40" step="1" value="{{acc.x}}" activeColor="#116b5a" backgroundColor="#e3e8e5" data-axis="x" bindchanging="updateAcc" bindchange="updateAcc" /></view>
+    <view class="control-row"><view class="control-meta"><text class="control-label">ACC Y</text><text class="control-value">{{acc.y / 10}}g</text></view><slider min="-40" max="40" step="1" value="{{acc.y}}" activeColor="#116b5a" backgroundColor="#e3e8e5" data-axis="y" bindchanging="updateAcc" bindchange="updateAcc" /></view>
+    <view class="control-row"><view class="control-meta"><text class="control-label">ACC Z</text><text class="control-value">{{acc.z / 10}}g</text></view><slider min="-40" max="40" step="1" value="{{acc.z}}" activeColor="#116b5a" backgroundColor="#e3e8e5" data-axis="z" bindchanging="updateAcc" bindchange="updateAcc" /></view>
+  </view>
+</view>

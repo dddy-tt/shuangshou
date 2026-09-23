@@ -10,6 +10,7 @@ const { createGuardianBindingService, ROLES } = require('../services/guardian-bi
 const { createGuardianMonitor } = require('../services/guardian-monitor');
 const { createGuardianOutbox } = require('../services/guardian-outbox');
 const { createAlarmAckController } = require('../services/alarm-ack');
+const { createSimulator } = require('../services/simulator');
 
 const DATA_LOG_INTERVAL_MS = 1000;
 const JY_MAX_SAMPLE_AGE_MS = 5000;
@@ -75,6 +76,7 @@ function emptyState() {
     lastRawFrame: '',
     bleLogs: [],
     lastError: '',
+    simulator: { active: false, running: false, intervalMs: 250, lastInjectedAt: 0, snapshot: { flex: Array(10).fill(0), imu: { roll: 0, pitch: 0, yaw: 0 }, acc: { x: 0, y: 0, z: 1 } } },
     safetyAlert: null,
     buzzerStatus: '',
     alarmAckStatus: { stage: 'idle', key: '', command: '', attempts: 0, maxAttempts: 0, detail: '' },
@@ -316,6 +318,22 @@ function createAppState(options = {}) {
       appendLog('warning', message);
     }
   });
+  const simulatorFactory = options.simulatorFactory || createSimulator;
+  const simulator = options.simulator || simulatorFactory({
+    onData: (arrayBuffer) => parser.push(arrayBuffer),
+    onStateChange: (next) => {
+      const patch = { simulator: next };
+      // 模拟器只能标识数据源，不能伪造 BLE 已连接；没有真实链路活动时，
+      // 以可读状态提示当前正式页面的数据来自开发测试源。
+      if (!state.connected && !state.connecting && !state.reconnecting && !state.discovering) {
+        patch.statusText = next.running
+          ? '虚拟手套连续数据流运行中'
+          : next.active ? '虚拟手套已注入一帧测试数据'
+            : 'Bluetooth disconnected';
+      }
+      emit(patch);
+    }
+  });
   function snapshot() {
     return {
       ...state,
@@ -333,6 +351,14 @@ function createAppState(options = {}) {
       care: { ...state.care },
       ppg: { ...state.ppg },
       calibration: { ...state.calibration, enabledFingers: state.calibration.enabledFingers.slice() },
+      simulator: {
+        ...state.simulator,
+        snapshot: state.simulator && state.simulator.snapshot ? {
+          flex: state.simulator.snapshot.flex.slice(),
+          imu: { ...state.simulator.snapshot.imu },
+          acc: { ...state.simulator.snapshot.acc }
+        } : null
+      },
       alarm: {
         active: state.alarm.active.map((item) => ({ ...item, sources: item.sources ? item.sources.slice() : [] })),
         allActive: (state.alarm.allActive || state.alarm.active).map((item) => ({ ...item, sources: item.sources ? item.sources.slice() : [] })),
@@ -945,6 +971,27 @@ function createAppState(options = {}) {
     },
     ingestRawData(arrayBuffer) {
       parser.push(arrayBuffer);
+    },
+    getSimulator() {
+      return simulator;
+    },
+    startSimulator() {
+      return simulator.start();
+    },
+    stopSimulator() {
+      return simulator.stop();
+    },
+    injectSimulator(simulatorOptions) {
+      return simulator.inject(simulatorOptions);
+    },
+    setSimulatorSnapshot(next, simulatorOptions) {
+      return simulator.setSnapshot(next, simulatorOptions);
+    },
+    applySimulatorPreset(name, simulatorOptions) {
+      return simulator.applyPreset(name, simulatorOptions);
+    },
+    loadSimulatorCase(testCase, simulatorOptions) {
+      return simulator.loadCase(testCase, simulatorOptions);
     },
     getAlarmAckController() {
       return alarmAck;

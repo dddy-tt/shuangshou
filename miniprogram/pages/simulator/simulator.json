@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "虚拟手套控制台",
+  "usingComponents": {
+    "status-badge": "/components/status-badge/status-badge",
+    "section-header": "/components/section-header/section-header"
+  }
+}

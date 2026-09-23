@@ -1,0 +1,10 @@
+@import "../../styles/tokens.wxss";
+
+.preset-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14rpx; margin-top: 22rpx; }
+.preset-button { min-width: 0; min-height: 80rpx; padding: 0 16rpx; font-size: 24rpx; }
+.control-row { margin-top: 20rpx; border-top: 1rpx solid var(--line); padding-top: 20rpx; }
+.control-row:first-of-type { margin-top: 22rpx; }
+.control-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 16rpx; }
+.control-label { color: var(--text); font-size: 26rpx; font-weight: 650; }
+.control-value { color: var(--ink); font-size: 30rpx; font-weight: 720; }
+.control-row slider { margin: 8rpx -6rpx 0; }

@@ -8,7 +8,8 @@
     "pages/remote/remote",
     "pages/gesture-train/gesture-train",
     "pages/gesture-library/gesture-library",
-    "pages/settings/settings"
+    "pages/settings/settings",
+    "pages/simulator/simulator"
   ],
   "tabBar": {
     "color": "#78857f",

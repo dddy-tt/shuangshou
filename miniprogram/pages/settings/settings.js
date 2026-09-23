@@ -3,6 +3,13 @@ const { formatMetric } = require('../../utils/realtime-view');
 const JY_ERR_ANGLE_ZERO = 0x10;
 function tone(state) { return state.connected ? 'success' : state.connecting || state.reconnecting ? 'warning' : state.lastError ? 'danger' : 'idle'; }
 function formatNumber(value) { return formatMetric(value, '—'); }
+function isDeveloperTools() {
+  try {
+    return typeof wx !== 'undefined' && wx.getSystemInfoSync && wx.getSystemInfoSync().platform === 'devtools';
+  } catch (error) {
+    return false;
+  }
+}
 function getJyStatus(jyStatus, bringup) {
   if (jyStatus && jyStatus.source === 'dynamic') {
     const online = jyStatus.online ? 1 : 0;
@@ -26,10 +33,11 @@ function getJyStatus(jyStatus, bringup) {
   return { online: false, title: 'JY61P 读取失败', detail: `设备响应后寄存器读取失败（返回码 ${bringup.jyRet}）。` };
 }
 Page({
-  data: { tone: 'idle', label: '未连接', statusText: '等待操作', deviceName: '—', service: '—', notify: '未开启', raw: '尚无原始数据', logs: [], care: { hr: 0, spo2: 0, fall: false, sos: false }, calibration: { flexZero: null, flexFull: null, imuZero: null }, fingers: [], imu: { roll: '—', pitch: '—', yaw: '—' }, jy: { online: false, title: '尚未收到 JY61P 状态帧', detail: '等待 BRINGUP 帧；连接后约每秒更新一次。' } },
-  onLoad() { this.runtime = getApp().getRuntime(); this.active = true; this.unsubscribe = this.runtime.subscribe((state) => this.applyState(state)); }, onShow() { this.active = true; this.applyState(this.runtime.getState()); }, onHide() { this.active = false; }, onUnload() { if (this.unsubscribe) this.unsubscribe(); },
+  data: { tone: 'idle', label: '未连接', statusText: '等待操作', deviceName: '—', service: '—', notify: '未开启', raw: '尚无原始数据', logs: [], care: { hr: 0, spo2: 0, fall: false, sos: false }, calibration: { flexZero: null, flexFull: null, imuZero: null }, fingers: [], imu: { roll: '—', pitch: '—', yaw: '—' }, jy: { online: false, title: '尚未收到 JY61P 状态帧', detail: '等待 BRINGUP 帧；连接后约每秒更新一次。' }, showSimulator: false },
+  onLoad() { this.runtime = getApp().getRuntime(); this.active = true; this.setData({ showSimulator: isDeveloperTools() }); this.unsubscribe = this.runtime.subscribe((state) => this.applyState(state)); }, onShow() { this.active = true; this.applyState(this.runtime.getState()); }, onHide() { this.active = false; }, onUnload() { if (this.unsubscribe) this.unsubscribe(); },
   applyState(state) { if (!this.active) return; this.setData({ tone: tone(state), label: state.connected ? '已连接' : state.reconnecting ? '重连中' : state.connecting ? '连接中' : state.lastError ? '异常' : '未连接', statusText: state.statusText, deviceName: state.deviceName || '—', service: state.serviceId && state.characteristicId ? `${state.serviceId.slice(0, 8)} / ${state.characteristicId.slice(0, 8)}` : '—', notify: state.notifyEnabled ? 'FFE1 Notify 已开启' : 'Notify 未开启', raw: state.lastRawFrame || '尚无原始数据', logs: state.bleLogs, care: state.care, calibration: state.calibration, fingers: FINGER_LABELS.map((label, index) => ({ label, index, enabled: state.calibration.enabledFingers[index] !== false })), imu: { roll: formatNumber(state.rawPose.roll), pitch: formatNumber(state.rawPose.pitch), yaw: formatNumber(state.rawPose.yaw) }, jy: getJyStatus(state.jyStatus, state.bringup) }); },
   scan() { this.runtime.scan().catch(() => {}); }, disconnect() { this.runtime.disconnect().catch(() => {}); },
   calibrate(event) { const method = event.currentTarget.dataset.method; try { this.runtime[method](); wx.showToast({ title: '校准已保存', icon: 'success' }); } catch (error) { wx.showToast({ title: error.message || '校准失败', icon: 'none' }); } },
-  toggleFinger(event) { const index = Number(event.currentTarget.dataset.index); try { this.runtime.toggleFinger(index); } catch (error) { wx.showToast({ title: error.message || '切换失败', icon: 'none' }); } }
+  toggleFinger(event) { const index = Number(event.currentTarget.dataset.index); try { this.runtime.toggleFinger(index); } catch (error) { wx.showToast({ title: error.message || '切换失败', icon: 'none' }); } },
+  goSimulator() { wx.navigateTo({ url: '/pages/simulator/simulator' }); }
 });
