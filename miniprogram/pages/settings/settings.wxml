@@ -25,5 +25,5 @@
   <view class="card"><section-header title="最近原始帧" copy="仅用于调试；协议解析由共享服务统一完成。" /><view class="raw">{{raw}}</view></view>
   <view class="card"><section-header title="护理演示状态" copy="演示用途，不作为医疗结论。" /><view class="metric-grid"><view class="metric"><view class="metric-label">HR</view><view class="metric-value">{{care.hr}}</view></view><view class="metric"><view class="metric-label">SpO2</view><view class="metric-value">{{care.spo2}}</view></view><view class="metric"><view class="metric-label">警报</view><view class="metric-value">{{care.fall || care.sos ? '是' : '否'}}</view></view></view></view>
   <view class="card"><section-header title="BLE 日志" copy="最近 80 条，本机内存保存。" /><view wx:if="{{!logs.length}}" class="empty-state">尚无蓝牙日志。</view><view wx:for="{{logs}}" wx:key="id" class="log"><text class="log-time">{{item.time}}</text><text class="log-level">{{item.level}}</text><text class="log-text">{{item.message}}</text></view></view>
-  <view wx:if="{{showSimulator}}" class="card"><section-header title="开发测试" copy="仅在微信开发者工具显示；不会出现在正式比赛使用路径。" /><button class="secondary-button simulator-entry" bindtap="goSimulator">打开虚拟手套控制台</button></view>
+  <view class="card"><section-header title="开发测试功能" copy="虚拟手套控制台仅用于开发与自动化验证；正式比赛时请勿启动。" /><button class="secondary-button simulator-entry" bindtap="goSimulator">打开虚拟手套控制台</button></view>
 </view>
