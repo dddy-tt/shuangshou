@@ -1,0 +1,15 @@
+<view class="screen">
+  <view class="page-head"><view><view class="eyebrow">GUARDIAN CENTER</view><view class="page-title">监护者中心</view><view class="page-copy">同一小程序内完成角色选择、一次性邀请码绑定和报警确认。</view></view></view>
+
+  <view wx:if="{{activeAlarm}}" class="guardian-alarm"><view class="alarm-kicker">ACTIVE DEVICE EVENT</view><view class="alarm-title">{{activeAlarm.label}}</view><view class="alarm-copy">事件 {{activeAlarm.boot}} / {{activeAlarm.id}} 正在活动。{{activeAlarm.acknowledgedBy.length ? '已确认，等待设备 ACTIVE=0。' : '请先确认佩戴者状态。'}}</view><view class="alarm-audio">{{alarmAudioStatus}}</view><button class="alarm-button" bindtap="acknowledgeAlarm">确认并停止本地提示</button><view class="guardian-only">监护者只能确认，不能远程发送解除或伪造固件消警。</view></view>
+
+  <view wx:if="{{!configured}}" class="notice notice-warning">{{statusText}} 云端未配置时，本页面不会连接公共 MQTT，也不会把 mock 数据当成真实监护事件。</view>
+
+  <view class="card"><view class="section-title">先选择本机角色</view><view class="section-copy">角色只保存在本机用于界面流程，云函数仍会按登录身份和绑定归属校验权限。</view><view class="role-row"><button class="{{role === 'wearer' ? 'role-active' : 'role-button'}}" data-role="wearer" bindtap="selectRole">我是佩戴者</button><button class="{{role === 'guardian' ? 'role-active' : 'role-button'}}" data-role="guardian" bindtap="selectRole">我是监护者</button></view></view>
+
+  <view wx:if="{{role === 'wearer'}}" class="card"><view class="section-title">生成一次性邀请码</view><view class="section-copy">邀请码默认 10 分钟有效，只能使用一次；需要先连接目标手套并完成云端配置。</view><button class="primary-button full-button" bindtap="createInvite">生成邀请码</button><view wx:if="{{inviteText}}" class="invite-box"><view class="invite-label">请交给监护者</view><view class="invite-code">{{inviteText}}</view><view class="invite-copy">有效期至 {{inviteExpiry}}</view></view></view>
+
+  <view wx:if="{{role === 'guardian'}}" class="card"><view class="section-title">接受佩戴者邀请</view><view class="section-copy">只输入佩戴者在本机生成的限时邀请码，不在客户端保存或传输密钥。</view><input class="input" maxlength="32" value="{{inviteCode}}" placeholder="输入邀请码" bindinput="onInviteInput" /><button class="primary-button full-button" bindtap="acceptInvite">接受绑定</button></view>
+
+  <view class="card"><view class="section-title">绑定与在线状态</view><view wx:if="{{binding}}" class="binding-box"><view class="binding-row"><text>绑定设备</text><text>{{binding.wearableId}}</text></view><view class="binding-row"><text>云端状态</text><text class="{{online ? 'online' : 'offline'}}">{{online ? '在线' : '离线或未上报'}}</text></view><view class="binding-row"><text>最近心跳</text><text>{{lastSeenText}}</text></view></view><view wx:else class="empty-state">尚未完成绑定。</view><view class="status-copy">{{statusText}}</view><view class="status-copy">{{outboxText}}</view><view wx:if="{{lastError}}" class="notice notice-danger">{{lastError}}</view><button class="secondary-button full-button" bindtap="refreshBinding">刷新绑定状态</button><button class="quiet-button full-button" bindtap="openAlarms">查看报警历史</button></view>
+</view>

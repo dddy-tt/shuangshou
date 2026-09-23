@@ -1,0 +1,10 @@
+<view class="monitor">
+  <view class="heading">实时手指弯曲度</view>
+  <view class="hint">{{connected ? '平直 · 半弯 · 全弯，随动作实时更新' : '蓝牙未连接 · 已有数值为上次数据'}}</view>
+  <view wx:for="{{hands}}" wx:key="name" wx:for-item="hand" class="hand">
+    <view class="hand-title">{{hand.name}}</view>
+    <view class="fingers"><view wx:for="{{hand.fingers}}" wx:key="label" class="cell">
+      <finger-bar label="{{item.label}}" value="{{item.value}}" disabled="{{item.disabled}}" state="{{item.state}}" tone="{{item.tone}}" />
+    </view></view>
+  </view>
+</view>

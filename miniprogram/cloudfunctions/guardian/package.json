@@ -1,0 +1,10 @@
+{
+  "name": "guardian",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Authenticated WeChat Cloud Function template for wearer/guardian binding and alarm events.",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "^2.6.3"
+  }
+}

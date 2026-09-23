@@ -1,0 +1,39 @@
+{
+  "collections": {
+    "guardian_accounts": {
+      "read": false,
+      "write": false,
+      "create": false,
+      "update": false,
+      "delete": false
+    },
+    "guardian_bindings": {
+      "read": false,
+      "write": false,
+      "create": false,
+      "update": false,
+      "delete": false
+    },
+    "guardian_invites": {
+      "read": false,
+      "write": false,
+      "create": false,
+      "update": false,
+      "delete": false
+    },
+    "guardian_events": {
+      "read": false,
+      "write": false,
+      "create": false,
+      "update": false,
+      "delete": false
+    },
+    "guardian_statuses": {
+      "read": false,
+      "write": false,
+      "create": false,
+      "update": false,
+      "delete": false
+    }
+  }
+}

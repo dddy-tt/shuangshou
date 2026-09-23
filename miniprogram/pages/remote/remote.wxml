@@ -1,0 +1,81 @@
+<view class="page-shell">
+  <view class="topbar">
+    <view><view class="eyebrow">DEVICE CONTROL / MQTT</view><view class="page-title">远控模式</view></view>
+    <view class="connection-pill {{mqttConnected ? 'connected' : ''}}">{{mqttConnected ? 'Broker 在线' : 'Broker 离线'}}</view>
+  </view>
+
+  <view wx:if="{{safetyAlert}}" class="alert">
+    <view class="alert-title">危险警告</view>
+    <view class="alert-copy">安全检测仍跨模式运行，当前姿态变化异常。</view>
+    <button class="danger" bindtap="handleAcknowledgeSafety">确认并停止提示</button>
+  </view>
+
+  <view class="panel">
+    <view class="panel-heading">
+      <view><view class="panel-title">我的电器</view><view class="muted">每个 ESP-01 继电器使用独立唯一 ID 和主题</view></view>
+      <button class="small-primary" bindtap="openAddDevice">添加电器</button>
+    </view>
+    <view wx:if="{{!devices.length}}" class="empty">尚未添加电器，请先添加一个 ESP-01 继电器。</view>
+    <view wx:for="{{devices}}" wx:key="id" class="device-card {{item.selected ? 'device-selected' : ''}}" data-device-id="{{item.id}}" bindtap="handleSelectDevice">
+      <view class="device-card-head">
+        <view><view class="device-name">{{item.name}}</view><view class="device-id">ID：{{item.id}}</view></view>
+        <view class="device-availability {{item.availability === 'online' ? 'availability-online' : ''}}">{{item.availabilityText}}</view>
+      </view>
+      <view class="device-state">{{item.stateText}}</view>
+      <view class="device-actions">
+        <button class="small-button" data-device-id="{{item.id}}" catchtap="openEditDevice">编辑</button>
+        <button class="small-button danger-small" data-device-id="{{item.id}}" catchtap="handleDeleteDevice">删除</button>
+      </view>
+      <view class="device-control-row">
+        <button class="primary" data-device-id="{{item.id}}" data-value="on" disabled="{{!mqttConnected || item.pending}}" catchtap="handleDeviceToggle">闭合</button>
+        <button class="secondary" data-device-id="{{item.id}}" data-value="off" disabled="{{!mqttConnected || item.pending}}" catchtap="handleDeviceToggle">断开</button>
+      </view>
+      <view wx:if="{{item.pending}}" class="pending-copy">等待该设备回报 {{item.actionText}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{showDeviceEditor}}" class="panel editor-panel">
+    <view class="panel-heading"><view class="panel-title">{{editingDeviceId ? '编辑电器' : '添加电器'}}</view></view>
+    <view class="field-label">电器名称</view>
+    <input class="device-input" value="{{deviceNameDraft}}" maxlength="32" placeholder="例如：客厅灯" bindinput="handleDeviceNameInput" />
+    <view class="field-label">ESP-01 唯一 ID</view>
+    <input class="device-input" value="{{deviceIdDraft}}" maxlength="64" placeholder="填写设备端显示的 chipId" bindinput="handleDeviceIdInput" />
+    <view class="muted editor-hint">ID 只用于区分设备并生成主题，不是密码；用户名、密码等技术密钥不在页面保存。</view>
+    <view wx:if="{{deviceEditorError}}" class="form-error">{{deviceEditorError}}</view>
+    <view class="device-editor-actions">
+      <button class="secondary" bindtap="cancelDeviceEditor">取消</button>
+      <button class="primary" bindtap="saveDevice">保存</button>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="panel-heading"><view class="panel-title">远控连接</view><view class="muted">ESP-01 · 单路继电器</view></view>
+    <view class="data-row"><text>Broker 状态</text><text>{{mqttMessage}}</text></view>
+    <view class="data-row"><text>当前设备</text><text>{{selectedDeviceName}}</text></view>
+    <view class="data-row"><text>设备可用性</text><text>{{selectedAvailability}}</text></view>
+    <view class="data-row"><text>继电器状态</text><text>{{lastState}}</text></view>
+    <button class="primary connect-button" bindtap="handleMqttConnect">{{mqttConnected ? '断开 MQTT' : '连接 MQTT'}}</button>
+  </view>
+
+  <hand-monitor fingers="{{fingers}}" enabled="{{enabledFingers}}" connected="{{connected}}" />
+  <view class="panel">
+    <view class="panel-heading"><view class="panel-title">手势绑定设备</view><switch checked="{{gestureControl}}" bindchange="toggleGestureControl" /></view>
+    <view class="feedback">{{gestureMessage}}</view>
+    <view wx:if="{{!controlGestures.length}}" class="empty">手势库中没有启用的 control 类 ON / OFF 手势。</view>
+    <view wx:for="{{controlGestures}}" wx:key="id" class="gesture-binding-row">
+      <view class="gesture-binding-info"><view class="gesture-name">{{item.name}}</view><view class="muted">动作：{{item.action}}</view></view>
+      <picker mode="selector" range="{{devicePickerNames}}" value="{{item.bindingIndex}}" data-gesture-id="{{item.id}}" bindchange="handleGestureBindingChange">
+        <view class="binding-picker">{{item.bindingName}}</view>
+      </picker>
+      <button class="small-button" data-gesture-id="{{item.id}}" catchtap="clearGestureBinding">清除</button>
+    </view>
+    <view class="muted gesture-hint">未绑定手势固定兼容 legacy 灯；只有明确选择“跟随当前选择”才跟随当前设备。已删除设备的绑定会保持禁用，不会静默迁移；多个目标同时命中时不会发送。</view>
+  </view>
+
+  <view class="panel">
+    <view class="panel-heading"><view class="panel-title">模式边界</view><view class="muted">当前：远控</view></view>
+    <view class="feedback">远控模式不会执行翻译、TTS 或康复动作判断。手势数据仍可用于跨模式安全检测；设备状态未知时不会显示为在线。</view>
+    <view class="muted safety-note">公共 broker 仅限演示，禁止用于真实无人值守或危险负载。</view>
+  </view>
+  <view wx:if="{{buzzerStatus}}" class="muted">{{buzzerStatus}}</view>
+</view>

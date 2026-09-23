@@ -1,0 +1,53 @@
+<view class="screen">
+  <view class="page-head">
+    <view>
+      <view class="eyebrow">LIVE TRANSLATION</view>
+      <view class="page-title">实时翻译</view>
+      <view class="page-copy">十指、姿态与手势结果同步更新。</view>
+    </view>
+    <status-badge tone="{{statusTone}}" text="{{statusLabel}}" />
+  </view>
+
+  <view class="global-alarm-entry {{safetyAlert ? 'global-alarm-active' : ''}}">
+    <view class="alarm-entry-title">{{alarmTitle}}</view>
+    <view class="alarm-entry-copy">{{alarmCopy}}</view>
+    <view class="alarm-entry-copy">{{safetyAlert ? alarmAudioStatus : '本地报警音按系统音量播放。'}}</view>
+    <view class="button-row">
+      <button class="light-button" bindtap="goAlarms">查看报警</button>
+      <button wx:if="{{safetyAlert}}" class="outline-light" disabled="{{acknowledgeDisabled}}" bindtap="handleAcknowledgeSafety">{{safetyAlert.acknowledgedBy.length ? '本地提示已停止' : '确认并停止本地提示'}}</button>
+      <button wx:if="{{safetyAlert && guardianRole !== 'guardian'}}" class="outline-light" disabled="{{resolveDisabled}}" bindtap="handleRequestResolve">{{resolveText}}</button>
+      <view wx:if="{{resolveStatus}}" class="alarm-entry-copy">{{resolveStatus}}</view>
+    </view>
+  </view>
+
+  <view class="result-card">
+    <view class="result-label">当前识别结果</view>
+    <view class="result-text">{{translation}}</view>
+    <view class="result-meta">{{recognition}} · 最近帧 {{lastFrame}}</view>
+    <view class="button-row">
+      <button class="light-button" bindtap="manualSpeak">播报文字</button>
+      <button class="outline-light" bindtap="goTrain">记录手势</button>
+    </view>
+    <view class="tts">{{ttsStatus}}</view>
+  </view>
+
+  <view class="card">
+    <section-header title="左手弯曲度" copy="0–30 平直 · 30–70 半弯 · 70–100 全弯" action="传感器" bind:action="goSettings" />
+    <view class="finger-grid"><finger-bar wx:for="{{left}}" wx:key="label" label="{{item.label}}" value="{{item.value}}" state="{{item.state}}" tone="{{item.tone}}" disabled="{{item.disabled}}" /></view>
+  </view>
+
+  <view class="card">
+    <section-header title="右手弯曲度" copy="关闭的通道不会参与识别与训练。" action="手势库" bind:action="goLibrary" />
+    <view class="finger-grid"><finger-bar wx:for="{{right}}" wx:key="label" label="{{item.label}}" value="{{item.value}}" state="{{item.state}}" tone="{{item.tone}}" disabled="{{item.disabled}}" /></view>
+  </view>
+
+  <view class="card">
+    <section-header title="姿态与系统状态" copy="IMU 为 JY61P 的 R / P / Y 数据。" action="详情" bind:action="goSettings" />
+    <view class="metric-grid">
+      <view class="metric"><view class="metric-label">Roll</view><view class="metric-value">{{pose.roll}}</view></view>
+      <view class="metric"><view class="metric-label">Pitch</view><view class="metric-value">{{pose.pitch}}</view></view>
+      <view class="metric"><view class="metric-label">Yaw</view><view class="metric-value">{{pose.yaw}}</view></view>
+    </view>
+    <view class="notice">护理演示：HR {{care.hr}} · SpO2 {{care.spo2}} · {{care.fall || care.sos ? '警示状态' : '状态平稳'}}。不作为医疗结论。</view>
+  </view>
+</view>

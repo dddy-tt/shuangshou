@@ -1,0 +1,19 @@
+<view class="screen">
+  <view class="page-head"><view><view class="eyebrow">SIGNWISE GLOVE</view><view class="page-title">智能手语手套</view><view class="page-copy">AI 手势实时翻译系统</view></view><status-badge tone="{{statusTone}}" text="{{statusLabel}}" /></view>
+  <view wx:if="{{activeAlarm}}" class="alarm-banner">
+    <view class="alarm-kicker">REAL DEVICE ALARM</view>
+    <view class="alarm-title">{{activeAlarm.label}}</view>
+    <view class="alarm-copy">设备事件 {{activeAlarm.boot}} / {{activeAlarm.id}} · {{alarmStatusText}}</view>
+    <view class="alarm-audio">{{alarmAudioStatus}}</view>
+    <view wx:if="{{resolveAlarmStatus}}" class="alarm-copy">{{resolveAlarmStatus}}</view>
+    <view class="button-row">
+      <button class="alarm-button" disabled="{{acknowledgeAlarmDisabled}}" bindtap="handleAcknowledgeAlarm">{{acknowledgeAlarmText}}</button>
+      <button wx:if="{{guardianRole !== 'guardian'}}" class="alarm-outline-button" disabled="{{resolveAlarmDisabled}}" bindtap="handleResolveAlarm">{{resolveAlarmText}}</button>
+    </view>
+    <button wx:if="{{canHideLocalAlarm}}" class="alarm-hide-button" bindtap="handleHideLocalAlarm">隐藏本机旧提示</button>
+  </view>
+  <view class="card device-card"><section-header title="设备控制中心" copy="{{statusText}}" /><view class="device-meta"><view><view class="device-name">{{deviceName}}</view><view class="device-copy">FFE0 / FFE1 · 最近数据 {{lastFrame}}</view></view><view class="signal {{connected ? 'signal-on' : ''}}">{{connected ? '数据流正常' : '等待连接'}}</view></view><view class="button-row"><button class="primary-button" loading="{{connecting}}" bindtap="handleScan">搜索 JDY-23</button><button wx:if="{{connected}}" class="secondary-button" bindtap="handleDisconnect">断开设备</button><button wx:else class="secondary-button" bindtap="goSettings">连接说明</button></view><view wx:if="{{devices.length}}" class="device-list"><view wx:for="{{devices}}" wx:key="deviceId" class="list-row"><view><view class="list-title">{{item.displayName}}</view><view class="list-copy">{{item.rssi}}</view></view><button class="quiet-connect" data-index="{{index}}" bindtap="handleConnect">连接</button></view></view><view wx:if="{{lastError}}" class="notice notice-danger">{{lastError}}</view></view>
+  <view class="card"><section-header title="现在可以做什么" copy="设备连接后，实时数据会在所有页面同步。" /><view class="quick-grid"><button class="quick-item" bindtap="goTranslation"><view class="quick-index">01</view><view class="quick-title">实时翻译</view><view class="quick-copy">查看十指与当前文字</view></button><button class="quick-item" bindtap="goTrain"><view class="quick-index">02</view><view class="quick-title">手势训练</view><view class="quick-copy">记录一次新的姿态</view></button><button class="quick-item" bindtap="goLibrary"><view class="quick-index">03</view><view class="quick-title">手势库</view><view class="quick-copy">管理已保存动作</view></button><button class="quick-item" bindtap="goSettings"><view class="quick-index">04</view><view class="quick-title">设备状态</view><view class="quick-copy">校准与调试日志</view></button></view></view>
+  <view class="card recent"><section-header title="最近状态" /><view class="recent-label">当前翻译结果</view><view class="recent-result">{{recentResult}}</view><view class="recent-copy">{{recentCopy}}</view></view>
+  <view class="card guardian-entry"><view><view class="guardian-entry-title">监护者中心</view><view class="guardian-entry-copy">{{guardianStatus}}</view></view><view class="button-row"><button class="primary-button" bindtap="goAlarms">报警记录</button><button class="secondary-button" bindtap="goGuardian">绑定与角色</button></view></view>
+</view>

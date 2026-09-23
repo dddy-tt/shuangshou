@@ -1,0 +1,33 @@
+{
+  "pages": [
+    "pages/home/home",
+    "pages/alarm/alarm",
+    "pages/guardian/guardian",
+    "pages/translation/translation",
+    "pages/rehabilitation/rehabilitation",
+    "pages/remote/remote",
+    "pages/gesture-train/gesture-train",
+    "pages/gesture-library/gesture-library",
+    "pages/settings/settings"
+  ],
+  "tabBar": {
+    "color": "#78857f",
+    "selectedColor": "#116b5a",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/home/home", "text": "首页" },
+      { "pagePath": "pages/translation/translation", "text": "翻译" },
+      { "pagePath": "pages/rehabilitation/rehabilitation", "text": "AI康复" },
+      { "pagePath": "pages/remote/remote", "text": "远控" }
+    ]
+  },
+  "window": {
+    "navigationBarTitleText": "智能手语手套",
+    "navigationBarBackgroundColor": "#f5f7f5",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f5f7f5"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

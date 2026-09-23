@@ -1,0 +1,1 @@
+<view class="section-row"><view><view class="section-title">{{title}}</view><view wx:if="{{copy}}" class="section-copy">{{copy}}</view></view><button wx:if="{{action}}" class="section-action" bindtap="tapAction">{{action}}</button></view>

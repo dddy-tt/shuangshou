@@ -1,0 +1,1 @@
+{ "navigationBarTitleText": "实时翻译", "usingComponents": { "status-badge": "/components/status-badge/status-badge", "section-header": "/components/section-header/section-header", "finger-bar": "/components/finger-bar/finger-bar" } }

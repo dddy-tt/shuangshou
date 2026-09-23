@@ -1,0 +1,43 @@
+{
+  "collections": {
+    "guardian_accounts": [],
+    "guardian_bindings": [
+      {
+        "name": "by_wearerOpenId",
+        "unique": false,
+        "fields": [
+          { "field": "wearerOpenId", "order": "asc" }
+        ]
+      },
+      {
+        "name": "by_guardianOpenId",
+        "unique": false,
+        "fields": [
+          { "field": "guardianOpenId", "order": "asc" }
+        ]
+      }
+    ],
+    "guardian_invites": [
+      {
+        "name": "unique_code",
+        "unique": true,
+        "fields": [
+          { "field": "code", "order": "asc" }
+        ]
+      }
+    ],
+    "guardian_events": [
+      {
+        "name": "by_binding_wearer_wearable_time",
+        "unique": false,
+        "fields": [
+          { "field": "bindingId", "order": "asc" },
+          { "field": "wearerOpenId", "order": "asc" },
+          { "field": "wearableId", "order": "asc" },
+          { "field": "occurredAt", "order": "desc" }
+        ]
+      }
+    ],
+    "guardian_statuses": []
+  }
+}

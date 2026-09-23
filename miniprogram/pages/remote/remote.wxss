@@ -1,0 +1,35 @@
+.data-row button { min-width: 170rpx; }
+.data-row view:first-child { flex: 1; }
+.small-primary, .small-button { box-sizing: border-box; min-height: 58rpx; border-radius: 16rpx; padding: 0 18rpx; font-size: 23rpx; font-weight: 650; }
+.small-primary { background: var(--brand); color: #fff; }
+.small-button { border: 1rpx solid var(--line); background: #fff; color: var(--text); }
+.danger-small { border-color: #efd4d2; background: var(--danger-soft); color: var(--danger); }
+.device-card { margin-top: 16rpx; border: 2rpx solid var(--line); border-radius: 22rpx; background: #fbfcfb; padding: 20rpx; }
+.device-card.device-selected { border-color: var(--brand); background: #f5fbf8; }
+.device-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18rpx; }
+.device-name { color: var(--ink); font-size: 31rpx; font-weight: 700; }
+.device-id { margin-top: 6rpx; color: var(--muted); font-size: 21rpx; word-break: break-all; }
+.device-availability { max-width: 48%; border-radius: 999rpx; background: #eff2f0; padding: 9rpx 12rpx; color: var(--muted); font-size: 20rpx; text-align: right; }
+.device-availability.availability-online { background: var(--success-soft); color: var(--success); }
+.device-state { margin-top: 18rpx; color: var(--text); font-size: 25rpx; line-height: 1.45; }
+.device-actions { display: flex; justify-content: flex-end; gap: 12rpx; margin-top: 16rpx; }
+.device-control-row { display: flex; gap: 14rpx; margin-top: 18rpx; }
+.device-control-row button { flex: 1; min-height: 72rpx; border-radius: 17rpx; font-size: 25rpx; font-weight: 650; }
+.device-control-row button[disabled] { opacity: .45; }
+.pending-copy { margin-top: 12rpx; color: var(--warning); font-size: 22rpx; }
+.empty { padding: 26rpx 0 8rpx; color: var(--muted); font-size: 24rpx; line-height: 1.55; }
+.editor-panel { background: #fbfcfb; }
+.device-input { box-sizing: border-box; width: 100%; height: 78rpx; border: 1rpx solid var(--line); border-radius: 16rpx; background: #fff; padding: 0 18rpx; color: var(--ink); font-size: 26rpx; }
+.editor-hint { margin-top: 12rpx; line-height: 1.5; }
+.form-error { margin-top: 12rpx; color: var(--danger); font-size: 23rpx; line-height: 1.45; }
+.device-editor-actions { display: flex; gap: 14rpx; margin-top: 20rpx; }
+.device-editor-actions button { flex: 1; min-height: 72rpx; border-radius: 17rpx; font-size: 26rpx; font-weight: 650; }
+.connect-button { margin-top: 14rpx; }
+.gesture-binding-row { display: flex; align-items: center; gap: 12rpx; border-top: 1rpx solid var(--line); padding: 18rpx 0; }
+.gesture-binding-row:first-of-type { margin-top: 12rpx; }
+.gesture-binding-info { min-width: 0; flex: 1; }
+.gesture-name { overflow: hidden; color: var(--ink); font-size: 26rpx; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.binding-picker { max-width: 230rpx; overflow: hidden; border: 1rpx solid var(--line); border-radius: 14rpx; background: #fff; padding: 13rpx 16rpx; color: var(--brand-strong); font-size: 22rpx; text-overflow: ellipsis; white-space: nowrap; }
+.gesture-binding-row > .small-button { flex: 0 0 auto; min-height: 52rpx; padding: 0 12rpx; }
+.gesture-hint { display: block; margin-top: 8rpx; line-height: 1.5; }
+.safety-note { display: block; margin-top: 16rpx; color: var(--warning); line-height: 1.5; }

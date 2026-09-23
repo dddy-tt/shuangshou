@@ -1,0 +1,1 @@
+Component({ properties: { label: { type: String, value: '' }, value: { type: Number, value: 0 }, state: { type: String, value: '等待' }, tone: { type: String, value: 'idle' }, disabled: { type: Boolean, value: false } } });

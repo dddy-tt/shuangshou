@@ -1,0 +1,1 @@
+<view class="finger {{disabled ? 'finger-disabled' : ''}}"><view class="finger-head"><text class="finger-label">{{label}}</text><text class="finger-value">{{disabled ? '—' : value}}</text></view><view class="track"><view class="fill fill-{{tone}}" style="width: {{disabled ? 0 : value}}%;"></view></view><view class="state state-{{tone}}">{{state}}</view></view>

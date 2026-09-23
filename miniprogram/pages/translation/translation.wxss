@@ -1,0 +1,6 @@
+@import "../../styles/tokens.wxss";
+.result-card { border-radius: 30rpx; background: var(--brand); padding: 30rpx; color: #fff; }.result-label { color: #cbe8df; font-size: 23rpx; font-weight: 650; letter-spacing: 1rpx; }.result-text { margin-top: 14rpx; font-size: 64rpx; font-weight: 730; line-height: 1.15; word-break: break-all; }.result-meta { margin-top: 18rpx; color: #d8eee8; font-size: 23rpx; }.light-button, .outline-light { flex: 1; min-width: 0; min-height: 82rpx; border-radius: 19rpx; font-size: 27rpx; font-weight: 650; }.light-button { background: #fff; color: var(--brand-strong); }.outline-light { border: 1rpx solid rgba(255,255,255,.45); background: transparent; color: #fff; }.tts { margin-top: 14rpx; color: #cbe8df; font-size: 22rpx; }.finger-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14rpx; margin-top: 24rpx; }
+.global-alarm-entry { margin: 20rpx 0; padding: 24rpx; border: 1rpx solid #c9ddd7; border-radius: 24rpx; background: #eff8f5; color: var(--brand-strong); }
+.global-alarm-active { border-color: #d64949; background: #fff0ef; color: #8f2323; }
+.alarm-entry-title { font-size: 32rpx; font-weight: 720; }
+.alarm-entry-copy { margin-top: 8rpx; font-size: 24rpx; line-height: 1.5; }

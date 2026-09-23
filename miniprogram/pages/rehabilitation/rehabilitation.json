@@ -1,0 +1,4 @@
+{
+  "navigationBarTitleText": "AI 康复模式",
+  "usingComponents": { "hand-monitor": "/components/hand-monitor/hand-monitor" }
+}

@@ -1,0 +1,2 @@
+@import "../../styles/tokens.wxss";
+.section-action { color: var(--brand); background: transparent; font-size: 24rpx; font-weight: 650; white-space: nowrap; }

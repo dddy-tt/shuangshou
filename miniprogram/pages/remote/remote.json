@@ -1,0 +1,4 @@
+{
+  "navigationBarTitleText": "MQTT 远控模式",
+  "usingComponents": { "hand-monitor": "/components/hand-monitor/hand-monitor" }
+}

@@ -1,0 +1,42 @@
+# Build products and IDE-local files
+*.o
+*.d
+*.crf
+*.axf
+*.hex
+*.lst
+*.lnp
+*.lnk
+*.dep
+*.htm
+*.map
+*.build_log.htm
+*.uvguix.*
+*.uvoptx
+*.bak
+DebugConfig/
+
+# PlatformIO / Node caches
+.pio/
+node_modules/
+.planning/
+npm-debug.log*
+
+# WeChat Developer Tools local state
+project.private.config.json
+
+# Local credentials: examples stay in the repository
+**/*.local.js
+*.pem
+*.key
+.env
+.env.*
+
+# OS/editor files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+~$*

@@ -1,0 +1,1 @@
+{ "navigationBarTitleText": "设备状态", "usingComponents": { "status-badge": "/components/status-badge/status-badge", "section-header": "/components/section-header/section-header" } }

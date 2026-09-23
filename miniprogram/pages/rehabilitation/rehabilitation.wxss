@@ -1,0 +1,4 @@
+.feedback view { margin-top: 8rpx; }
+.data-row text:last-child { max-width: 70%; text-align: right; }
+.alert-title { font-weight: 700; }
+.alert-copy { margin-top: 8rpx; }

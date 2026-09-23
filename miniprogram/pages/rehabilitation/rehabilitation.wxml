@@ -1,0 +1,58 @@
+<view class="page-shell">
+  <view class="topbar">
+    <view><view class="eyebrow">GUIDED PRACTICE</view><view class="page-title">AI 康复模式</view></view>
+    <view class="connection-pill {{connected ? 'connected' : ''}}">{{connected ? '已连接' : '未连接'}}</view>
+  </view>
+
+  <view wx:if="{{safetyAlert}}" class="alert">
+    <view class="alert-title">真实报警：{{safetyAlert.label}}</view>
+    <view class="alert-copy">设备 {{safetyAlert.deviceId}} · BOOT {{safetyAlert.boot}} · ID {{safetyAlert.id}}</view>
+    <view class="alert-copy">{{safetyAlert.acknowledgedBy.length ? '已确认，本地提示已停止；等待固件 ACTIVE=0。' : '尚未确认，请优先确认佩戴者状态。'}}</view>
+    <view wx:if="{{buzzerStatus}}" class="alert-copy">{{buzzerStatus}}</view>
+    <view class="button-row">
+      <button class="danger" disabled="{{acknowledgeDisabled}}" bindtap="handleAcknowledgeSafety">{{safetyAlert.acknowledgedBy.length ? '本地提示已停止' : '确认并停止本地提示'}}</button>
+      <button wx:if="{{guardianRole !== 'guardian'}}" class="secondary" disabled="{{resolveDisabled}}" bindtap="handleRequestResolve">{{resolveText}}</button>
+      <button class="secondary" bindtap="goAlarms">查看报警记录</button>
+    </view>
+    <view wx:if="{{resolveStatus}}" class="alert-copy">{{resolveStatus}}</view>
+  </view>
+
+  <view class="panel">
+    <view class="panel-heading"><view class="panel-title">训练目标</view><view class="muted">{{statusText}}</view></view>
+    <view wx:if="{{target}}" class="metric"><view class="metric-label">请完成手势</view><view class="metric-value">{{target.text}}</view></view>
+    <view wx:else class="empty">训练目标来自翻译模式的自定义手势库。</view>
+    <view wx:if="{{countdown > 0}}" class="countdown">{{countdown}}</view>
+    <view class="button-row">
+      <button class="primary" bindtap="startTraining">随机开始</button>
+      <button class="secondary" bindtap="stopTraining">暂停</button>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="panel-heading"><view class="panel-title">实时反馈</view><view class="muted">{{training ? '正在判断' : '未开始'}}</view></view>
+    <view class="feedback">{{resultText}}<view wx:if="{{feedback}}">{{feedback}}</view></view>
+    <view class="muted">{{speechStatus}}</view>
+    <button class="secondary" bindtap="playFeedback" disabled="{{!speechText}}">重播反馈</button>
+    <view wx:for="{{differences}}" wx:key="label" class="data-row"><text>{{item.label}}</text><text class="status-red">{{item.text}}</text></view>
+  </view>
+
+  <hand-monitor fingers="{{fingers}}" enabled="{{enabledFingers}}" connected="{{connected}}" />
+
+  <view class="panel">
+    <view class="panel-heading"><view class="panel-title">训练统计</view><view class="muted">辅助信息</view></view>
+    <view class="grid-2">
+      <view class="metric"><view class="metric-label">总次数</view><view class="metric-value">{{stats.total}}</view></view>
+      <view class="metric"><view class="metric-label">正确次数</view><view class="metric-value">{{stats.correct}}</view></view>
+      <view class="metric"><view class="metric-label">正确率</view><view class="metric-value">{{stats.accuracy}}</view></view>
+      <view class="metric"><view class="metric-label">连续正确</view><view class="metric-value">{{stats.streak}}</view></view>
+    </view>
+  </view>
+
+  <view class="panel">
+    <view class="panel-heading"><view class="panel-title">JY61P 姿态</view><view class="muted">仅用于观察</view></view>
+    <view class="data-row"><text>Roll</text><text>{{pose.roll}}</text></view>
+    <view class="data-row"><text>Pitch</text><text>{{pose.pitch}}</text></view>
+    <view class="data-row"><text>Yaw</text><text>{{pose.yaw}}</text></view>
+  </view>
+  <view wx:if="{{buzzerStatus}}" class="muted">{{buzzerStatus}}</view>
+</view>
