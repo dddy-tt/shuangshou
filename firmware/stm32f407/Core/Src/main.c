@@ -79,6 +79,8 @@
 #define TEST_ACK_MAX_LENGTH                 80U
 #define TEST_ACK_RETRY_PERIOD_MS             20U
 #define TESTDBG_PERIOD_MS                  3000U
+#define STACK_MONITOR_PATTERN          0xA5A5A5A5UL
+#define STACK_MONITOR_GUARD            0xD15EA5EDUL
 
 /* 当前硬件配置：启用右手 JY61P，关闭左手 JY61P，关闭 DFPlayer，启用蜂鸣器。 */
 #define JY61P_RIGHT_ENABLE 1U
@@ -163,6 +165,10 @@ static uint8_t  alarm_buzzer_active = 0U;
 static uint32_t t_jy_right_recover = 0U;
 static uint32_t t_testdbg = 0U;
 static uint8_t testdbg_float_sent = 0U;
+static uint8_t stack_monitor_ready = 0U;
+
+extern uint32_t Stack_Mem;
+extern uint32_t __initial_sp;
 
 /* JY61P 双手姿态数据（由驱动层维护） */
 extern JY61P_Data_t JY61P_Right;
@@ -177,6 +183,35 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+/* Fill only the unused portion below the current MSP; never touch live frames. */
+static void StackMonitor_Init(void)
+{
+    uint32_t base = (uint32_t)&Stack_Mem;
+    uint32_t top = (uint32_t)&__initial_sp;
+    uint32_t sp = __get_MSP();
+    uint32_t address;
+
+    if (top <= base + 64U || sp <= base + 32U || sp > top) return;
+    *(volatile uint32_t *)base = STACK_MONITOR_GUARD;
+    for (address = base + 4U; address + 4U <= sp - 16U; address += 4U) {
+        *(volatile uint32_t *)address = STACK_MONITOR_PATTERN;
+    }
+    stack_monitor_ready = 1U;
+}
+
+static uint32_t StackMonitor_Used(void)
+{
+    uint32_t address = (uint32_t)&Stack_Mem + 4U;
+    uint32_t top = (uint32_t)&__initial_sp;
+
+    if (stack_monitor_ready == 0U) return 0U;
+    while (address < top &&
+           *(volatile const uint32_t *)address == STACK_MONITOR_PATTERN) {
+        address += 4U;
+    }
+    return top - address;
+}
 
 static uint8_t Alarm_MainTimestampFresh(uint32_t now_ms, uint32_t stamp_ms)
 {
@@ -342,6 +377,18 @@ static void TestInput_MainSendDebug(uint32_t now_ms)
         (long)((snapshot != NULL) ? TestInput_DebugScale(snapshot->acc[2], 1000U) : -2000000000L));
     if (length > 0 && (size_t)length < sizeof(line)) (void)BT_SendString(line);
 
+    if (stack_monitor_ready != 0U) {
+        uint32_t size = (uint32_t)&__initial_sp - (uint32_t)&Stack_Mem;
+        uint32_t used = StackMonitor_Used();
+        length = snprintf(line, sizeof(line),
+            "[STACK]|SIZE=%lu|USED=%lu|FREE=%lu|GUARD=%u\r\n",
+            (unsigned long)size, (unsigned long)used,
+            (unsigned long)(size - used),
+            (unsigned int)(*(volatile const uint32_t *)&Stack_Mem ==
+                           STACK_MONITOR_GUARD));
+        if (length > 0 && (size_t)length < sizeof(line)) (void)BT_SendString(line);
+    }
+
     length = snprintf(line, sizeof(line),
         "[TESTDBG] PUB=%lu|JR=%ld|JP=%ld|JY=%ld|JAX=%ld|JAY=%ld|JAZ=%ld|"
         "ONLINE=%u|EV=%u|LAST=%u|AV=%u|ANGV=%u|ASEEN=%u|GSEEN=%u\r\n",
@@ -403,6 +450,8 @@ int main(void)
 #endif
   Alarm_Config_t alarm_config;
   /* USER CODE END 1 */
+
+  StackMonitor_Init();
 
   /* MCU Configuration--------------------------------------------------------*/
   HAL_Init();
@@ -939,18 +988,19 @@ int main(void)
         frame[pos++] = 0xBBU;
 
         {
+            /* Used only by the main loop; do not reserve all frame buffers on MSP. */
 #if !MAX30102_DIAG_ONLY
-            char flex_line[128];
-            char imu_line[64];
-            char care_line[80];
+            static char flex_line[128];
+            static char imu_line[64];
+            static char care_line[80];
 #endif
-            char jy_line[96];
-            char acc_line[96];
-            char ppg_line[96];
-            char alarm_state_line[96];
+            static char jy_line[96];
+            static char acc_line[96];
+            static char ppg_line[96];
+            static char alarm_state_line[96];
 #if MAX30102_DIAG_ONLY
-            char ppgdbg_line[160];
-            char ppgq_line[112];
+            static char ppgdbg_line[160];
+            static char ppgq_line[112];
 #endif
             uint8_t hr_value = max30102_present ? MAX30102_GetHR() : 0U;
             uint8_t spo2_value = max30102_present ? MAX30102_GetSpO2() : 0U;

@@ -5,6 +5,7 @@ $main = Get-Content -Raw (Join-Path $firmwareRoot 'Core\Src\main.c')
 $source = Get-Content -Raw (Join-Path $firmwareRoot 'Core\Src\test_input.c')
 $jy61p = Get-Content -Raw (Join-Path $firmwareRoot 'Core\Inc\jy61p.h')
 $project = Get-Content -Raw (Join-Path $firmwareRoot 'MDK-ARM\shuangshou.uvprojx')
+$startup = Get-Content -Raw (Join-Path $firmwareRoot 'MDK-ARM\startup_stm32f407xx.s')
 $ioc = Get-Content -Raw (Join-Path $firmwareRoot 'shuangshou.ioc')
 
 if ($source -notmatch 'source = TEST_INPUT_SOURCE_REAL') {
@@ -39,6 +40,14 @@ if ($jy61p -notmatch 'JY61P_ACC_SCALE\s+0\.00478515625f') {
 }
 if ($project -notmatch '<FileName>test_input\.c</FileName>') {
     throw 'Keil project does not compile test_input.c.'
+}
+if ($startup -notmatch 'Stack_Size\s+EQU\s+0x1000\b') {
+    throw 'The validated 4 KB stack must not regress to the corrupting 1 KB setting.'
+}
+if ($main -notmatch 'StackMonitor_Init\(\)' -or
+    $main -notmatch '\[STACK\]\|SIZE=' -or
+    $main -notmatch 'static char flex_line\[128\]') {
+    throw 'The measured stack guard or main-loop buffer reduction is missing.'
 }
 if ($ioc -notmatch 'PC10\.Signal=USART3_TX' -or
     $ioc -notmatch 'PC11\.Signal=USART3_RX' -or

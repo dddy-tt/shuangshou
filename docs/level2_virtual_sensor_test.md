@@ -77,13 +77,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File firmware/stm32f407/tests/usa
 
 [ARM Compiler v5.06 MicroLIB 手册](https://documentation-service.arm.com/static/5f72dfd11b758617cd953afc?token=) 列出的不支持格式转换是 `%lc`、`%ls`、`%a`，并没有把 `%f` 列为不支持。因此这里只把浮点格式化当作需要目标机对照的假设，不能仅凭启用了 MicroLIB 就更换正式遥测格式化实现。
 
-本轮必须在 Keil 对目标工程执行 **Rebuild All target files**，确认 0 Error / 0 Warning，然后 **Flash → Download** 烧录新 HEX；只 Build 或运行旧固件不会出现 `[TESTDBG]`。关掉占用 COM15 的串口监视器后运行：
+本机已验证可由代理自动执行 Keil CLI **Rebuild All**，使用 `E:\download\bin\STM32_Programmer_CLI.exe` 经唯一 ST-Link 正常下载 HEX、校验、复位并运行，再自行运行以下 Runner；不需要用户手动点击 Download。CubeProgrammer 仅擦除 HEX 覆盖的扇区，没有整片擦除。这是本次 Level 2 调试闭环，不是 Level 3 自动烧录框架。
 
 ```powershell
 python tools/glove_test/run_virtual_sensor_test.py --port COM15
 ```
 
-请保留完整输出，尤其是 `[TESTDBG]`、正式 `IMU|...`、`ACC|...` 和最终 FAIL/PASS。若没有 `[TESTDBG]`，先核对新固件是否烧录、是否仍处于 VIRTUAL、TX 是否拥塞；不能直接推断发布函数没运行。
+Runner 会直接打印 `[TESTDBG]`、正式 `IMU|...`、`ACC|...` 和最终 FAIL/PASS。若没有 `[TESTDBG]`，先核对新固件是否烧录、是否仍处于 VIRTUAL、TX 是否拥塞；不能直接推断发布函数没运行。
+
+## 已证实的栈越界与水位
+
+2026-09-24 真机 A/B：原 `Stack_Size=0x400` 时，快照正确且 `PUB=180`，但 JY 数据被损坏，Runner FAIL。对应 map 中栈从 `0x20003cf8` 向低地址增长，紧邻 `JY61P_Left` (`0x20003cb0`) 和 `JY61P_Right` (`0x20003c68`)。Keil 静态调用图最大深度 **1272 字节 + 不可追踪调用**，单是该深度已超过 1024 字节；`main` 帧为 840 字节。
+
+仅将栈改为 `0x1000`、重新编译烧录后，正式 FLEX/IMU/ACC 和 Runner 均 PASS。4 KB 栈水位最初显示 `USED=1504|FREE=2592|GUARD=1`，连续三次一致。随后将仅在主循环使用的遥测文本缓冲区改为静态存储，`main` 帧降为 320 字节，静态最大深度降至 **752 字节 + 不可追踪调用**；最终真机水位 `SIZE=4096|USED=984|FREE=3112|GUARD=1`，Runner 再次 PASS。保留 4 KB 栈以覆盖中断嵌套与静态分析未知部分。
+
+`[STACK]` 仅在 VIRTUAL 模式的低频诊断中发送；`USED` 是自启动早期填充水位后观察到的峰值，不是所有物理场景下的绝对上限。若以后启用新功能或增加中断负载，应重新测量。当前正式遥测仍由原生产路径输出，`[TESTDBG]` / `[STACK]` 不参与 Runner PASS 判定。
 
 ## Level 3 接入点
 

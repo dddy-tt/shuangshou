@@ -1,5 +1,7 @@
 # Build products and IDE-local files
 *.o
+*.obj
+*.pdb
 *.d
 *.crf
 *.axf

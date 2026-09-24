@@ -497,3 +497,29 @@
 - 固件 host 测试覆盖 parser 快照整数值、正式 motion 写入、有效位、publish_count、APPLY 前/EXIT 后/timeout 后不再发布；静态接线检查通过。
 - Keil UV4 / ARM Compiler 5.06u6 对最终代码执行 `-r` Rebuild All，日志 `firmware/stm32f407/MDK-ARM/level2_testdbg_rebuild_final.log` 为 `0 Error(s), 0 Warning(s)`，已重新生成 HEX；未执行 Download，未在新固件上验证 MicroLIB `%f` 或最终正式 IMU/ACC。
 - 本机本次能枚举 COM15，但 Runner 收不到任何字节，无法替代用户下一次通电、烧录后的真机测试。完整验证步骤和字段解释见 `docs/level2_virtual_sensor_test.md`。
+
+## 2026-09-24 - Level 2 真机栈溢出修复及自动闭环
+
+### 根因与改动
+
+- 真机基线重现：`TESTDBG` 快照正确、`PUB=180`，但 `JY61P_Right` 字段非法，正式 IMU/ACC 为零，Runner FAIL。Keil 调用图显示最大静态栈深度 1272 字节 + 不可追踪调用，超过原 1024 字节；map 证实向低地址越界时首先覆盖紧邻的 `JY61P_Left`，随后是 `JY61P_Right`。这是造成虚拟姿态字段损坏的根因。
+- 修复后正式 `%f` 格式的 IMU/ACC 在目标机上输出正确，因此本次故障并非 MicroLIB `snprintf` 浮点格式化；没有更改正式 wire protocol。
+- A/B 只把启动栈从 `0x400` 改为 `0x1000`：Rebuild、ST-Link 正常下载/校验/复位/运行后，正式 FLEX、IMU、ACC 全部匹配，Runner `PASS: mixed_fingers`。增加水位测量，4 KB 栈最初峰值 1504 字节，guard 完好。
+- 将主循环独占的遥测文本 buffer 改为静态存储；`main` 栈帧从 840 降至 320 字节，静态最大深度从 1272 降至 752 字节（均另有不可追踪调用）。最终 4 KB 栈真机水位 `USED=984|FREE=3112|GUARD=1`。保留 4 KB 以覆盖中断嵌套，不以单次测值压缩栈。
+- 增加 `test_input_wiring_test.ps1` 守卫，防止栈回退到已证实出错的 1 KB；保留原 TESTDBG，增加仅 VIRTUAL 输出的 `[STACK]`。未改正式数据协议、Runner、USART3、CubeMX 或小程序。
+
+### 验证
+
+- Keil UV4 / ARMCC5 对最终固件 **Rebuild All：0 Error、0 Warning**；HEX/AXF 已生成。最终 ZI 20108 字节、RW 252 字节；map 中 SRAM1 已用 `0x4f88` / 最大 `0x1c000`，Heap 512 字节段被链接器移除。
+- 唯一 ST-Link SN 与 Keil 工程配置吻合，CubeProgrammer CLI 正常下载 HEX，仅擦除覆盖扇区 `[0, 2]`，`Download verified successfully`，随后 `MCU Reset`、`Core run`。Keil 自带 `-f` 曾报 `Target DLL has been cancelled`，因此实际烧录使用 CubeProgrammer CLI。
+- COM15 9600 8N1 真机：原 1 KB 固件 FAIL；4 KB 初版连续 4 次 PASS；缓冲区优化后的最终固件再次 PASS，正式帧为 `FLEX|L1=0...R5=100`、`IMU|R=10.00|P=-5.00|Y=2.00`、`ACC|X=0.000|Y=0.000|Z=1.000|VALID=1`。
+- 五项固件 host C 测试、三项 PowerShell wiring 测试、Python Runner tests 全部通过。MSVC AddressSanitizer 对生产 `test_input.c`、`bluetooth.c`、`jy61p.c`、`usart3_rx.c` 的现有 host harness 通过，未发现越界；`gesture.c` / `flex_sensor.c` 无独立现成 ASan harness，本轮做了索引边界静态审查。ADC DMA 是 halfword/circular，长度 10 与 `uint16_t[10]` 一致。
+- 当前峰值只覆盖已运行的启动及测试流程；比赛全负载（更多中断、传感器组合）仍需持续观察 `[STACK]` 水位。小程序与实际佩戴场景不属于本轮 Level 2 验收。
+
+### 修改文件
+
+- `firmware/stm32f407/MDK-ARM/startup_stm32f407xx.s`
+- `firmware/stm32f407/Core/Src/main.c`
+- `firmware/stm32f407/tests/test_input_wiring_test.ps1`
+- `.gitignore`（忽略 host ASan 产生的 `.obj` / `.pdb` 编译产物）
+- `docs/level2_virtual_sensor_test.md`、`docs/progress.md`
