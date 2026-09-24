@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "jy61p.h"
+
 #define TEST_INPUT_FLEX_COUNT 10U
 #define TEST_INPUT_TIMEOUT_MS 5000U
 
@@ -34,5 +36,6 @@ uint8_t TestInput_Service(uint32_t now_ms);
 TestInput_Source_t TestInput_GetSource(void);
 uint8_t TestInput_HasAppliedSnapshot(void);
 const TestInput_Snapshot_t *TestInput_GetAppliedSnapshot(void);
+void TestInput_PublishMotion(JY61P_Data_t *target, uint32_t now_ms);
 
 #endif /* __TEST_INPUT_H */

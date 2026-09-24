@@ -27,9 +27,9 @@
 #define JY61P_BURST_ANGLE_LEN      6U
 
 /* ── 转换常数 ── */
-#define JY61P_ACC_SCALE      0.00478515625f
+#define JY61P_ACC_SCALE      0.00048828125f  /* 16 g / 32768 raw counts */
 #define JY61P_GYRO_SCALE     0.06103515625f
-#define JY61P_ANGLE_SCALE    0.0054931640625f
+#define JY61P_ANGLE_SCALE    0.0054931640625f /* 180 deg / 32768 counts */
 
 /* 最近一次运行事务的错误位；LAST 字段按此掩码输出。 */
 #define JY61P_ERR_ACC        0x01U

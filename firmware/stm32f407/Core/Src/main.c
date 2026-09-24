@@ -221,44 +221,6 @@ static void Alarm_MainStopBuzzer(void)
     alarm_buzzer_active = 0U;
 }
 
-static int16_t TestInput_MainFloatToRaw(float value, float scale)
-{
-    float raw = value / scale;
-
-    if (raw > 32767.0f) return 32767;
-    if (raw < -32768.0f) return -32768;
-    return (int16_t)raw;
-}
-
-static void TestInput_MainPublishMotion(uint32_t now_ms)
-{
-    const TestInput_Snapshot_t *snapshot = TestInput_GetAppliedSnapshot();
-    uint8_t i;
-
-    if (snapshot == 0) return;
-
-    for (i = 0U; i < 3U; i++) {
-        JY61P_Right.acc[i] = snapshot->acc[i];
-        JY61P_Right.acc_raw[i] = TestInput_MainFloatToRaw(
-            snapshot->acc[i], JY61P_ACC_SCALE);
-        JY61P_Right.gyro[i] = 0.0f;
-        JY61P_Right.gyro_raw[i] = 0;
-        JY61P_Right.angle[i] = snapshot->angle[i];
-        JY61P_Right.angle_raw[i] = TestInput_MainFloatToRaw(
-            snapshot->angle[i], JY61P_ANGLE_SCALE);
-    }
-    JY61P_Right.online = 1U;
-    JY61P_Right.error_streak = 0U;
-    JY61P_Right.last_error = 0U;
-    JY61P_Right.acc_valid = snapshot->acc_valid;
-    JY61P_Right.angle_valid = 1U;
-    JY61P_Right.acc_sample_seen = 1U;
-    JY61P_Right.angle_sample_seen = 1U;
-    JY61P_Right.angle_zero_streak = 0U;
-    JY61P_Right.acc_updated_ms = now_ms;
-    JY61P_Right.angle_updated_ms = now_ms;
-}
-
 static void TestInput_MainPublishFlex(void)
 {
     const TestInput_Snapshot_t *snapshot = TestInput_GetAppliedSnapshot();
@@ -467,7 +429,7 @@ int main(void)
         t_jy_poll = now;
         float acc[3], gyro[3], angle[3];
         if (TestInput_GetSource() == TEST_INPUT_SOURCE_VIRTUAL) {
-            TestInput_MainPublishMotion(now);
+            TestInput_PublishMotion(&JY61P_Right, now);
         } else {
         /*
          * Do not access an IMU which failed its power-on probe. An absent I2C
