@@ -21,6 +21,7 @@
 - 4 次 stack watermark 均为 `SIZE=4096 USED=984 FREE=3112 GUARD=1`。
 - 最终一键命令 `python tools/glove_test/test_hardware.py --port COM15` 返回 exit code 0，结果 `LEVEL 3 PASS`。
 - 本轮完整日志：`artifacts/hardware_test/20260924_221846_719540_46912/`。
+- 随后再次执行同一完整命令复测，仍为 `LEVEL 3 PASS`：Python 29/29、全部固件/wiring tests、Rebuild 0/0、Flash verify/reset/run，以及四个硬件 cases 全部通过；本次 HEX SHA-256 与前次一致。复测日志：`artifacts/hardware_test/20260924_222903_693565_49012/`。
 
 ### 已知边界
 
