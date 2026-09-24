@@ -10,12 +10,26 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 
 FLEX_KEYS = ["L1", "L2", "L3", "L4", "L5", "R1", "R2", "R3", "R4", "R5"]
 IMU_KEYS = ["roll", "pitch", "yaw"]
 ACC_KEYS = ["x", "y", "z"]
+TELEMETRY_PATTERNS = {
+    "FLEX": re.compile(
+        r"FLEX\|L1=(\d+)\|L2=(\d+)\|L3=(\d+)\|L4=(\d+)\|L5=(\d+)"
+        r"\|R1=(\d+)\|R2=(\d+)\|R3=(\d+)\|R4=(\d+)\|R5=(\d+)"
+    ),
+    "IMU": re.compile(
+        r"IMU\|R=([-+]?\d+(?:\.\d+)?)\|P=([-+]?\d+(?:\.\d+)?)"
+        r"\|Y=([-+]?\d+(?:\.\d+)?)"
+    ),
+    "ACC": re.compile(
+        r"ACC\|X=([-+]?\d+(?:\.\d+)?)\|Y=([-+]?\d+(?:\.\d+)?)"
+        r"\|Z=([-+]?\d+(?:\.\d+)?)\|VALID=([01])"
+    ),
+}
 
 
 class TestFailure(RuntimeError):
@@ -146,55 +160,44 @@ def _send_with_retries(
     raise AssertionError("retry loop must return or raise")
 
 
-def _find_values(pattern: str, lines: Iterable[str]) -> tuple[str, ...] | None:
-    regex = re.compile(pattern)
-    for line in lines:
-        match = regex.search(line)
-        if match:
-            return match.groups()
-    return None
+def _update_latest_telemetry(line: str, latest: dict[str, Any]) -> bool:
+    for kind, pattern in TELEMETRY_PATTERNS.items():
+        match = pattern.fullmatch(line)
+        if match is None:
+            continue
+        values = match.groups()
+        if kind == "FLEX":
+            latest[kind] = [int(value) for value in values]
+        elif kind == "IMU":
+            latest[kind] = [float(value) for value in values]
+        else:
+            latest[kind] = [float(value) for value in values[:3]] + [values[3] == "1"]
+        return True
+    return False
 
 
-def _verify_telemetry(case: dict[str, Any], lines: list[str]) -> None:
-    flex = _find_values(
-        r"FLEX\|L1=(\d+)\|L2=(\d+)\|L3=(\d+)\|L4=(\d+)\|L5=(\d+)"
-        r"\|R1=(\d+)\|R2=(\d+)\|R3=(\d+)\|R4=(\d+)\|R5=(\d+)",
-        lines,
-    )
-    imu = _find_values(
-        r"IMU\|R=([-+]?\d+(?:\.\d+)?)\|P=([-+]?\d+(?:\.\d+)?)"
-        r"\|Y=([-+]?\d+(?:\.\d+)?)",
-        lines,
-    )
-    acc = _find_values(
-        r"ACC\|X=([-+]?\d+(?:\.\d+)?)\|Y=([-+]?\d+(?:\.\d+)?)"
-        r"\|Z=([-+]?\d+(?:\.\d+)?)\|VALID=([01])",
-        lines,
-    )
-    if flex is None or imu is None or acc is None:
-        raise TestFailure(
-            f"missing telemetry: FLEX={flex is not None}, IMU={imu is not None}, "
-            f"ACC={acc is not None}"
-        )
-    actual_flex = [int(value) for value in flex]
-    if actual_flex != case["flex"]:
-        raise TestFailure(f"FLEX expected={case['flex']} actual={actual_flex}")
-
+def _telemetry_matches(case: dict[str, Any], latest: dict[str, Any]) -> bool:
+    flex, imu, acc = (latest[kind] for kind in ("FLEX", "IMU", "ACC"))
+    if flex != case["flex"] or imu is None or acc is None:
+        return False
     expected_imu = [case["imu"][key] for key in IMU_KEYS]
-    actual_imu = [float(value) for value in imu]
-    if any(abs(a - e) > 0.02 for a, e in zip(actual_imu, expected_imu)):
-        raise TestFailure(f"IMU expected={expected_imu} actual={actual_imu}")
-
     expected_acc = [case["acc"][key] for key in ACC_KEYS]
-    actual_acc = [float(value) for value in acc[:3]]
-    actual_valid = acc[3] == "1"
-    if any(abs(a - e) > 0.005 for a, e in zip(actual_acc, expected_acc)) or (
-        actual_valid != case["acc"]["valid"]
-    ):
-        raise TestFailure(
-            f"ACC expected={expected_acc + [case['acc']['valid']]} "
-            f"actual={actual_acc + [actual_valid]}"
-        )
+    return (
+        all(abs(actual - expected) <= 0.02 for actual, expected in zip(imu, expected_imu))
+        and all(abs(actual - expected) <= 0.005 for actual, expected in zip(acc[:3], expected_acc))
+        and acc[3] == case["acc"]["valid"]
+    )
+
+
+def _telemetry_timeout_error(case: dict[str, Any], latest: dict[str, Any]) -> TestFailure:
+    return TestFailure(
+        "telemetry did not converge within timeout:\n"
+        f"  expected FLEX={case['flex']}\n  latest FLEX={latest['FLEX']}\n"
+        f"  expected IMU={[case['imu'][key] for key in IMU_KEYS]}\n"
+        f"  latest IMU={latest['IMU']}\n"
+        f"  expected ACC={[case['acc'][key] for key in ACC_KEYS] + [case['acc']['valid']]}\n"
+        f"  latest ACC={latest['ACC']}"
+    )
 
 
 def run_virtual_test(
@@ -235,19 +238,14 @@ def run_virtual_test(
                 _wait_for(port, expected, timeout)
 
         deadline = time.monotonic() + timeout
-        telemetry: list[str] = []
+        latest: dict[str, Any] = {"FLEX": None, "IMU": None, "ACC": None}
         while time.monotonic() < deadline:
             line = _read_text_line(port)
             if line:
-                telemetry.append(line)
                 print(f"RX {line}")
-                try:
-                    _verify_telemetry(case, telemetry)
+                if _update_latest_telemetry(line, latest) and _telemetry_matches(case, latest):
                     return
-                except TestFailure as error:
-                    if not str(error).startswith("missing telemetry"):
-                        raise
-        _verify_telemetry(case, telemetry)
+        raise _telemetry_timeout_error(case, latest)
     except BaseException as error:
         primary_error = error
         raise

@@ -15,10 +15,12 @@ SPEC.loader.exec_module(RUNNER)
 
 
 class FakeSerial:
-    def __init__(self, case, confirm_exit=True, miss_responses=None):
+    def __init__(self, case, confirm_exit=True, miss_responses=None,
+                 telemetry_after_apply=None):
         self.case = case
         self.confirm_exit = confirm_exit
         self.miss_responses = dict(miss_responses or {})
+        self.telemetry_after_apply = telemetry_after_apply
         self.lines = []
         self.writes = []
 
@@ -49,7 +51,7 @@ class FakeSerial:
             flex = self.case["flex"]
             imu = self.case["imu"]
             acc = self.case["acc"]
-            self.lines.extend(
+            telemetry = (
                 [
                     (
                         "FLEX|" + "|".join(
@@ -61,6 +63,13 @@ class FakeSerial:
                     f"ACC|X={acc['x']:.3f}|Y={acc['y']:.3f}|Z={acc['z']:.3f}|VALID={1 if acc['valid'] else 0}\r\n".encode("ascii"),
                 ]
             )
+            if self.telemetry_after_apply is None:
+                self.lines.extend(telemetry)
+            else:
+                self.lines.extend(
+                    (line + "\r\n").encode("ascii")
+                    for line in self.telemetry_after_apply
+                )
         return len(payload)
 
     def readline(self):
@@ -68,6 +77,29 @@ class FakeSerial:
 
 
 class RunnerTests(unittest.TestCase):
+    def run_with_telemetry(self, lines, timeout=0.02):
+        case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
+        serial = FakeSerial(case, telemetry_after_apply=lines)
+        RUNNER.run_virtual_test(
+            serial, case, timeout=timeout, settle_seconds=0,
+            enter_timeout=0.01, exit_timeout=0.01,
+        )
+        self.assertEqual(serial.writes[-1], "TEST:EXIT")
+        return case
+
+    @staticmethod
+    def correct_frames(case):
+        flex = "FLEX|" + "|".join(
+            f"{key}={value}" for key, value in zip(RUNNER.FLEX_KEYS, case["flex"])
+        )
+        imu = case["imu"]
+        acc = case["acc"]
+        return (
+            flex,
+            f"IMU|R={imu['roll']:.2f}|P={imu['pitch']:.2f}|Y={imu['yaw']:.2f}",
+            f"ACC|X={acc['x']:.3f}|Y={acc['y']:.3f}|Z={acc['z']:.3f}|VALID={int(acc['valid'])}",
+        )
+
     def test_all_case_files_are_valid(self):
         for path in sorted((ROOT / "tests" / "cases").glob("*.json")):
             with self.subTest(path=path.name):
@@ -150,6 +182,43 @@ class RunnerTests(unittest.TestCase):
             [line for line in serial.writes if line == "TEST:EXIT"],
             ["TEST:EXIT"] * 3,
         )
+
+    def test_old_imu_and_acc_then_new_frames_converge(self):
+        case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
+        flex, imu, acc = self.correct_frames(case)
+        self.run_with_telemetry([
+            flex, "IMU|R=0.00|P=0.00|Y=0.00",
+            "ACC|X=0.000|Y=0.000|Z=0.000|VALID=1", imu, acc,
+        ])
+
+    def test_imu_never_converges_reports_latest_values(self):
+        case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
+        flex, _, acc = self.correct_frames(case)
+        with self.assertRaises(RUNNER.TestFailure) as failure:
+            self.run_with_telemetry([
+                flex, "IMU|R=0.00|P=0.00|Y=0.00", acc,
+                "IMU|R=0.00|P=0.00|Y=0.00",
+            ])
+        message = str(failure.exception)
+        for label in ("expected FLEX", "latest FLEX", "expected IMU",
+                      "latest IMU", "expected ACC", "latest ACC"):
+            self.assertIn(label, message)
+        self.assertIn("[0.0, 0.0, 0.0]", message)
+
+    def test_old_flex_then_new_flex_converges(self):
+        case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
+        flex, imu, acc = self.correct_frames(case)
+        self.run_with_telemetry([
+            "FLEX|" + "|".join(f"{key}=0" for key in RUNNER.FLEX_KEYS),
+            imu, acc, flex,
+        ])
+
+    def test_telemetry_converges_in_any_order(self):
+        case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
+        flex, imu, acc = self.correct_frames(case)
+        for order in ([acc, flex, imu], [imu, acc, flex], [flex, imu, acc]):
+            with self.subTest(order=order):
+                self.run_with_telemetry(order)
 
 
 if __name__ == "__main__":
