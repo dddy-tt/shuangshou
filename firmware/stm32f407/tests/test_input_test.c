@@ -1,7 +1,15 @@
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 
 #include "../Core/Inc/test_input.h"
+
+typedef char JySizeCheck[(sizeof(JY61P_Data_t) == 72U) ? 1 : -1];
+typedef char JyAngleOffsetCheck[(offsetof(JY61P_Data_t, angle) == 24U) ? 1 : -1];
+typedef char JyOnlineOffsetCheck[(offsetof(JY61P_Data_t, online) == 54U) ? 1 : -1];
+typedef char JyLastOffsetCheck[(offsetof(JY61P_Data_t, last_error) == 56U) ? 1 : -1];
+typedef char JyAccValidOffsetCheck[(offsetof(JY61P_Data_t, acc_valid) == 57U) ? 1 : -1];
+typedef char JyAccTimeOffsetCheck[(offsetof(JY61P_Data_t, acc_updated_ms) == 64U) ? 1 : -1];
 
 static int failures;
 
@@ -50,6 +58,8 @@ int main(void)
     JY61P_Data_t motion;
 
     TestInput_Init();
+    CHECK(TestInput_GetPublishCount() == 0U,
+          "publish count must start at zero");
     CHECK(TestInput_GetSource() == TEST_INPUT_SOURCE_REAL,
           "power-on source must be REAL");
     result = TestInput_HandleLine("ALARM_ACK:1:2\n", 0U, response,
@@ -78,6 +88,8 @@ int main(void)
     TestInput_PublishMotion(&pending_motion, 12U);
     CHECK(memcmp(&pending_motion, &pending_before, sizeof(pending_motion)) == 0,
           "motion publish must be a no-op before APPLY");
+    CHECK(TestInput_GetPublishCount() == 0U,
+          "ENTER before APPLY must not count a publish");
 
     CHECK(strstr(send_line("TEST:FLEX|L1=0|L2=30|L3=70|L4=101|L5=40|"
                            "R1=50|R2=60|R3=70|R4=80|R5=90\n", 12U),
@@ -121,10 +133,20 @@ int main(void)
     CHECK(snapshot != NULL && snapshot->acc[2] == 1.0f &&
           snapshot->acc_valid == 1U,
           "ACC and valid must survive APPLY");
+    CHECK(snapshot != NULL &&
+          TestInput_DebugScale(snapshot->angle[0], 100U) == 1000 &&
+          TestInput_DebugScale(snapshot->angle[1], 100U) == -500 &&
+          TestInput_DebugScale(snapshot->angle[2], 100U) == 200 &&
+          TestInput_DebugScale(snapshot->acc[0], 1000U) == 0 &&
+          TestInput_DebugScale(snapshot->acc[1], 1000U) == 0 &&
+          TestInput_DebugScale(snapshot->acc[2], 1000U) == 1000,
+          "diagnostic scaled integers must represent the parsed snapshot");
     sequence = snapshot != NULL ? snapshot->sequence : 0U;
 
     memset(&motion, 0, sizeof(motion));
     TestInput_PublishMotion(&motion, 24U);
+    CHECK(TestInput_GetPublishCount() == 1U,
+          "first APPLY must count one actual motion publish");
     CHECK(motion.angle[0] == 10.0f && motion.angle[1] == -5.0f &&
           motion.angle[2] == 2.0f,
           "first APPLY must publish all angle axes to formal JY structure");
@@ -133,8 +155,15 @@ int main(void)
           "first APPLY must preserve the existing JY61P raw scale");
     CHECK(motion.online != 0U && motion.angle_valid != 0U &&
           motion.acc_valid != 0U && motion.acc_updated_ms == 24U &&
-          motion.angle_updated_ms == 24U,
+          motion.angle_updated_ms == 24U &&
+          motion.error_streak == 0U && motion.last_error == 0U &&
+          motion.acc_sample_seen == 1U && motion.angle_sample_seen == 1U,
           "first APPLY must publish formal JY validity and timestamp fields");
+    CHECK(TestInput_DebugScale(motion.angle[0], 100U) == 1000 &&
+          TestInput_DebugScale(motion.angle[1], 100U) == -500 &&
+          TestInput_DebugScale(motion.angle[2], 100U) == 200 &&
+          TestInput_DebugScale(motion.acc[2], 1000U) == 1000,
+          "published JY values must match the integer diagnostic");
 
     CHECK(strstr(send_line("TEST:FLEX|L1=255|L2=0|L3=0|L4=0|L5=0|"
                            "R1=0|R2=0|R3=0|R4=0|R5=0\n", 24U),
@@ -167,6 +196,8 @@ int main(void)
           snapshot->acc_valid == 0U,
           "second APPLY must replace ACC and validity");
     TestInput_PublishMotion(&motion, 29U);
+    CHECK(TestInput_GetPublishCount() == 2U,
+          "second APPLY must increment motion publish count");
     CHECK(motion.angle[0] == -12.5f && motion.angle[1] == 3.25f &&
           motion.angle[2] == 45.5f && motion.acc[0] == -0.5f &&
           motion.acc[1] == 0.25f && motion.acc[2] == 0.75f &&
@@ -183,6 +214,9 @@ int main(void)
           "timeout must restore REAL");
     CHECK(TestInput_GetAppliedSnapshot() == NULL,
           "timeout must invalidate virtual snapshot");
+    TestInput_PublishMotion(&motion, 30U + TEST_INPUT_TIMEOUT_MS);
+    CHECK(TestInput_GetPublishCount() == 2U,
+          "timeout must stop virtual motion publishing");
 
     CHECK(strstr(send_line("TEST:ENTER\n", 6000U), "MODE=VIRTUAL") != NULL,
           "second ENTER must work");
@@ -192,6 +226,11 @@ int main(void)
           "source must report REAL after EXIT");
     CHECK(TestInput_GetAppliedSnapshot() == NULL,
           "EXIT must invalidate the applied virtual snapshot");
+    TestInput_PublishMotion(&motion, 6002U);
+    CHECK(TestInput_GetPublishCount() == 2U,
+          "EXIT must stop virtual motion publishing");
+    CHECK(TestInput_DebugScale(1.0e38f, 100U) == -2000000000L,
+          "invalid motion data must use an integer diagnostic sentinel");
 
     if (failures != 0) return 1;
     printf("test_input_test: all checks passed\n");

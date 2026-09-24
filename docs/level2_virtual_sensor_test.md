@@ -54,6 +54,37 @@ powershell -NoProfile -ExecutionPolicy Bypass -File firmware/stm32f407/tests/tes
 powershell -NoProfile -ExecutionPolicy Bypass -File firmware/stm32f407/tests/usart3_rx_wiring_test.ps1
 ```
 
+## Virtual motion 整数诊断（Level 2 真机定位）
+
+仅在 `TEST:ENTER` 后的 VIRTUAL 模式发送 `[TESTDBG]`，每 3 秒最多一组；结构布局和 `%f` 对照只在首次成功发布快照后发送一次。该诊断不参与 Runner 的 PASS 判定；PASS 仍须比对正式 `FLEX`、`IMU`、`ACC` 帧。`-2000000000` 表示浮点值无效或超出诊断转换范围。为避免 9600 波特率拥塞，正常 REAL 模式没有这些诊断帧。
+
+使用默认 `mixed.json` 时，APPLY 后预期看到：
+
+```text
+[TESTDBG] SRC=1|APPLIED=1|SEQ=1|SR=1000|SP=-500|SY=200|SAX=0|SAY=0|SAZ=1000
+[TESTDBG] PUB=<大于 0 的数字>|JR=1000|JP=-500|JY=200|JAX=0|JAY=0|JAZ=1000|ONLINE=1|EV=0|LAST=0|AV=1|ANGV=1|ASEEN=1|GSEEN=1
+[TESTDBG] SZ=72|OFF_ANGLE=24|OFF_ONLINE=54|OFF_LAST=56|OFF_AV=57|OFF_ACCMS=64|FIXED=1000|FLOAT=10.00
+```
+
+`SR/SP/SY` 是 applied snapshot 姿态乘 100；`SAX/SAY/SAZ` 是加速度乘 1000。`JR/JP/JY` 与 `JAX/JAY/JAZ` 是正式 `JY61P_Right` 对应字段按同一比例转换后的值。`PUB` 只在 `TestInput_PublishMotion()` 实际写入目标结构后加 1；VIRTUAL 模式持续运行时它应增长。`APPLIED=0` 时尚未应用快照，`PUB` 不应因这次进入虚拟模式而增长。`ONLINE/EV/LAST/AV/ANGV/ASEEN/GSEEN` 分别是 online、error_streak、last_error、acc_valid、angle_valid、acc_sample_seen、angle_sample_seen。
+
+判断顺序：
+
+1. `APPLIED=1`，但快照整数不符合输入：检查 TEST parser / APPLY 快照。
+2. 快照正确而 `PUB` 一直不增加：检查主循环 10 ms motion 调度。
+3. `PUB` 增加而 `J*` 或标志位不符合快照：检查发布写入后的覆盖、结构布局和内存损坏。当前代码中真实 JY 读取/恢复只位于 REAL 分支；没有发现 I2C 回调写这个结构。
+4. `J*` 正确、`FIXED=1000`，但 `FLOAT` 或正式 IMU/ACC 文本错误：优先调查当前 ARMCC5 MicroLIB 的 `snprintf("%f")` 目标机行为；不能凭主机 libc 测试断言它正常。
+
+[ARM Compiler v5.06 MicroLIB 手册](https://documentation-service.arm.com/static/5f72dfd11b758617cd953afc?token=) 列出的不支持格式转换是 `%lc`、`%ls`、`%a`，并没有把 `%f` 列为不支持。因此这里只把浮点格式化当作需要目标机对照的假设，不能仅凭启用了 MicroLIB 就更换正式遥测格式化实现。
+
+本轮必须在 Keil 对目标工程执行 **Rebuild All target files**，确认 0 Error / 0 Warning，然后 **Flash → Download** 烧录新 HEX；只 Build 或运行旧固件不会出现 `[TESTDBG]`。关掉占用 COM15 的串口监视器后运行：
+
+```powershell
+python tools/glove_test/run_virtual_sensor_test.py --port COM15
+```
+
+请保留完整输出，尤其是 `[TESTDBG]`、正式 `IMU|...`、`ACC|...` 和最终 FAIL/PASS。若没有 `[TESTDBG]`，先核对新固件是否烧录、是否仍处于 VIRTUAL、TX 是否拥塞；不能直接推断发布函数没运行。
+
 ## Level 3 接入点
 
 Level 3 可在 Runner 外层增加两个步骤：调用 Keil 命令行构建 `firmware/stm32f407/MDK-ARM/shuangshou.uvprojx`，再调用 ST-Link CLI 烧录生成的 HEX。Level 2 的 TEST 协议、case 文件和串口判定逻辑无需重写。

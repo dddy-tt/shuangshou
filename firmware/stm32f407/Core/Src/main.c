@@ -45,6 +45,7 @@
 #include "test_input.h"
 #include "usart3_rx.h"
 #include "math.h"
+#include "stddef.h"
 #include "stdio.h"
 #include "string.h"
 /* USER CODE END Includes */
@@ -77,6 +78,7 @@
 #define TEST_ACK_QUEUE_DEPTH                 4U
 #define TEST_ACK_MAX_LENGTH                 80U
 #define TEST_ACK_RETRY_PERIOD_MS             20U
+#define TESTDBG_PERIOD_MS                  3000U
 
 /* 当前硬件配置：启用右手 JY61P，关闭左手 JY61P，关闭 DFPlayer，启用蜂鸣器。 */
 #define JY61P_RIGHT_ENABLE 1U
@@ -159,6 +161,8 @@ static uint8_t  alarm_clear_pending = 0U;
 static uint32_t alarm_buzzer_started_ms = 0U;
 static uint8_t  alarm_buzzer_active = 0U;
 static uint32_t t_jy_right_recover = 0U;
+static uint32_t t_testdbg = 0U;
+static uint8_t testdbg_float_sent = 0U;
 
 /* JY61P 双手姿态数据（由驱动层维护） */
 extern JY61P_Data_t JY61P_Right;
@@ -305,6 +309,83 @@ static void TestInput_MainServiceAcks(uint32_t now_ms)
     if (next_tail >= TEST_ACK_QUEUE_DEPTH) next_tail = 0U;
     test_ack_tail = next_tail;
     test_ack_count--;
+}
+
+/* Only in VIRTUAL mode, at low rate. Numeric fields do not use printf %f. */
+static void TestInput_MainSendDebug(uint32_t now_ms)
+{
+    const TestInput_Snapshot_t *snapshot;
+    char line[192];
+    char formatted_angle[32];
+    int length;
+
+    if (TestInput_GetSource() != TEST_INPUT_SOURCE_VIRTUAL) {
+        testdbg_float_sent = 0U;
+        return;
+    }
+    if ((uint32_t)(now_ms - t_testdbg) < TESTDBG_PERIOD_MS) {
+        return;
+    }
+    t_testdbg = now_ms;
+    snapshot = TestInput_GetAppliedSnapshot();
+
+    length = snprintf(line, sizeof(line),
+        "[TESTDBG] SRC=1|APPLIED=%u|SEQ=%lu|SR=%ld|SP=%ld|SY=%ld|"
+        "SAX=%ld|SAY=%ld|SAZ=%ld\r\n",
+        (unsigned int)(snapshot != NULL),
+        (unsigned long)((snapshot != NULL) ? snapshot->sequence : 0U),
+        (long)((snapshot != NULL) ? TestInput_DebugScale(snapshot->angle[0], 100U) : -2000000000L),
+        (long)((snapshot != NULL) ? TestInput_DebugScale(snapshot->angle[1], 100U) : -2000000000L),
+        (long)((snapshot != NULL) ? TestInput_DebugScale(snapshot->angle[2], 100U) : -2000000000L),
+        (long)((snapshot != NULL) ? TestInput_DebugScale(snapshot->acc[0], 1000U) : -2000000000L),
+        (long)((snapshot != NULL) ? TestInput_DebugScale(snapshot->acc[1], 1000U) : -2000000000L),
+        (long)((snapshot != NULL) ? TestInput_DebugScale(snapshot->acc[2], 1000U) : -2000000000L));
+    if (length > 0 && (size_t)length < sizeof(line)) (void)BT_SendString(line);
+
+    length = snprintf(line, sizeof(line),
+        "[TESTDBG] PUB=%lu|JR=%ld|JP=%ld|JY=%ld|JAX=%ld|JAY=%ld|JAZ=%ld|"
+        "ONLINE=%u|EV=%u|LAST=%u|AV=%u|ANGV=%u|ASEEN=%u|GSEEN=%u\r\n",
+        (unsigned long)TestInput_GetPublishCount(),
+        (long)TestInput_DebugScale(JY61P_Right.angle[0], 100U),
+        (long)TestInput_DebugScale(JY61P_Right.angle[1], 100U),
+        (long)TestInput_DebugScale(JY61P_Right.angle[2], 100U),
+        (long)TestInput_DebugScale(JY61P_Right.acc[0], 1000U),
+        (long)TestInput_DebugScale(JY61P_Right.acc[1], 1000U),
+        (long)TestInput_DebugScale(JY61P_Right.acc[2], 1000U),
+        (unsigned int)JY61P_Right.online,
+        (unsigned int)JY61P_Right.error_streak,
+        (unsigned int)JY61P_Right.last_error,
+        (unsigned int)JY61P_Right.acc_valid,
+        (unsigned int)JY61P_Right.angle_valid,
+        (unsigned int)JY61P_Right.acc_sample_seen,
+        (unsigned int)JY61P_Right.angle_sample_seen);
+    if (length > 0 && (size_t)length < sizeof(line)) (void)BT_SendString(line);
+
+    if (snapshot != NULL && TestInput_GetPublishCount() != 0U &&
+        testdbg_float_sent == 0U) {
+        length = snprintf(formatted_angle, sizeof(formatted_angle), "%.2f",
+                          (double)JY61P_Right.angle[0]);
+        if (length < 0) {
+            (void)snprintf(formatted_angle, sizeof(formatted_angle), "ERR");
+        } else if ((size_t)length >= sizeof(formatted_angle)) {
+            (void)snprintf(formatted_angle, sizeof(formatted_angle), "TRUNC");
+        }
+        length = snprintf(line, sizeof(line),
+            "[TESTDBG] SZ=%u|OFF_ANGLE=%u|OFF_ONLINE=%u|OFF_LAST=%u|"
+            "OFF_AV=%u|OFF_ACCMS=%u|FIXED=%ld|FLOAT=%s\r\n",
+            (unsigned int)sizeof(JY61P_Data_t),
+            (unsigned int)offsetof(JY61P_Data_t, angle),
+            (unsigned int)offsetof(JY61P_Data_t, online),
+            (unsigned int)offsetof(JY61P_Data_t, last_error),
+            (unsigned int)offsetof(JY61P_Data_t, acc_valid),
+            (unsigned int)offsetof(JY61P_Data_t, acc_updated_ms),
+            (long)TestInput_DebugScale(JY61P_Right.angle[0], 100U),
+            formatted_angle);
+        if (length > 0 && (size_t)length < sizeof(line) &&
+            BT_SendString(line) != 0U) {
+            testdbg_float_sent = 1U;
+        }
+    }
 }
 
 /* USER CODE END 0 */
@@ -468,6 +549,7 @@ int main(void)
     if (TestInput_Service(now) != 0U) {
         TestInput_MainQueueAck("[TEST] MODE=REAL|REASON=TIMEOUT\r\n");
     }
+    TestInput_MainSendDebug(now);
 
     if (alarm_buzzer_active != 0U &&
         (uint32_t)(now - alarm_buzzer_started_ms) >=

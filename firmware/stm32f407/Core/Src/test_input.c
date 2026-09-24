@@ -16,6 +16,7 @@ typedef struct {
     uint8_t staged_acc;
     uint8_t has_applied;
     uint32_t last_activity_ms;
+    uint32_t publish_count;
 } TestInput_State_t;
 
 static TestInput_State_t test_state;
@@ -393,4 +394,25 @@ void TestInput_PublishMotion(JY61P_Data_t *target, uint32_t now_ms)
     target->angle_zero_streak = 0U;
     target->acc_updated_ms = now_ms;
     target->angle_updated_ms = now_ms;
+    test_state.publish_count++;
+}
+
+uint32_t TestInput_GetPublishCount(void)
+{
+    return test_state.publish_count;
+}
+
+int32_t TestInput_DebugScale(float value, uint16_t multiplier)
+{
+    float scaled;
+
+    if (isfinite(value) == 0 || multiplier == 0U || multiplier > 1000U) {
+        return -2000000000L;
+    }
+    scaled = value * (float)multiplier;
+    if (isfinite(scaled) == 0 || scaled < -1000000.0f ||
+        scaled > 1000000.0f) {
+        return -2000000000L;
+    }
+    return (int32_t)(scaled + ((scaled >= 0.0f) ? 0.5f : -0.5f));
 }

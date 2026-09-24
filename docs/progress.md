@@ -476,3 +476,24 @@
 - 重新烧录此次固件后运行 `python tools/glove_test/run_virtual_sensor_test.py --port COM15`。
 - 检查先出现 `[TEST] MODE=VIRTUAL`，再出现 FLEX/IMU/ACC/APPLY ACK 与正式遥测；观察 `UART3_RX` 的 `BYTES/LINES/ERR/RECOVER/ARMFAIL/ACK_RETRY/ACK_DROP`。
 - 软件模拟不能验证 USB-TTL 实际方向、电平、地线、PC11 电气噪声或现场错误率；这些仍需 COM15 真机结果确认。本次没有修改小程序、CubeMX `.ioc`、引脚或 TEST 协议。
+
+## 2026-09-24 - Level 2 Virtual motion 证据诊断
+
+### 已完成
+
+- 只在 VIRTUAL 模式输出低频整数 `[TESTDBG]`：applied snapshot、实际写入计数、`JY61P_Right` 三轴/加速度与状态、目标编译的结构大小/偏移，以及一次 Roll 的 `FIXED` 对比 `snprintf("%.2f")`。
+- `publish_count` 只在 `TestInput_PublishMotion()` 真正写入后递增；调试整数转换对非有限或越界值返回明确哨兵。
+- `JY61P_Data_t` 大小及关键字段偏移在每个包含头文件的编译单元作编译期检查；保留现有 REAL/VIRTUAL 分流、正式遥测和 Python Runner 判定。
+- 静态检查已确认真实 JY61P 读取/恢复位于 REAL 分支；`gesture.c` 只读 `JY61P_Right`。现有审查未发现能确定导致当前异常的数组越界，但仍需新固件的诊断帧区分覆盖与格式化问题。
+- ARM Compiler v5.06 官方 MicroLIB 文档并未将 `%f` 列为不支持格式，故尚不能把正式 IMU/ACC 错误归因为 `%f`；保留目标机的整数/浮点对照，等待实测证据。
+
+### 修改文件
+
+- `firmware/stm32f407/Core/Inc/jy61p.h`、`Core/Inc/test_input.h`、`Core/Src/test_input.c`、`Core/Src/main.c`、`tests/test_input_test.c`
+- `docs/level2_virtual_sensor_test.md`、`docs/progress.md`
+
+### 验证与待测
+
+- 固件 host 测试覆盖 parser 快照整数值、正式 motion 写入、有效位、publish_count、APPLY 前/EXIT 后/timeout 后不再发布；静态接线检查通过。
+- Keil UV4 / ARM Compiler 5.06u6 对最终代码执行 `-r` Rebuild All，日志 `firmware/stm32f407/MDK-ARM/level2_testdbg_rebuild_final.log` 为 `0 Error(s), 0 Warning(s)`，已重新生成 HEX；未执行 Download，未在新固件上验证 MicroLIB `%f` 或最终正式 IMU/ACC。
+- 本机本次能枚举 COM15，但 Runner 收不到任何字节，无法替代用户下一次通电、烧录后的真机测试。完整验证步骤和字段解释见 `docs/level2_virtual_sensor_test.md`。

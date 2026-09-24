@@ -9,6 +9,7 @@
 #define __JY61P_H
 
 #include "stdint.h"
+#include "stddef.h"
 
 /* ── I2C 地址 ── */
 #define JY61P_I2C_ADDR    0xA0U   /* 8-bit 写地址 (7-bit: 0x50 << 1) */
@@ -57,6 +58,14 @@ typedef struct {
     uint32_t acc_updated_ms;
     uint32_t angle_updated_ms;
 } JY61P_Data_t;
+
+/* Compile in every translation unit; a full rebuild catches stale layouts. */
+typedef char JY61P_SizeCheck[(sizeof(JY61P_Data_t) == 72U) ? 1 : -1];
+typedef char JY61P_AngleOffsetCheck[(offsetof(JY61P_Data_t, angle) == 24U) ? 1 : -1];
+typedef char JY61P_OnlineOffsetCheck[(offsetof(JY61P_Data_t, online) == 54U) ? 1 : -1];
+typedef char JY61P_LastOffsetCheck[(offsetof(JY61P_Data_t, last_error) == 56U) ? 1 : -1];
+typedef char JY61P_AccValidOffsetCheck[(offsetof(JY61P_Data_t, acc_valid) == 57U) ? 1 : -1];
+typedef char JY61P_AccTimeOffsetCheck[(offsetof(JY61P_Data_t, acc_updated_ms) == 64U) ? 1 : -1];
 
 extern JY61P_Data_t JY61P_Right;
 extern JY61P_Data_t JY61P_Left;

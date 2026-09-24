@@ -37,5 +37,8 @@ TestInput_Source_t TestInput_GetSource(void);
 uint8_t TestInput_HasAppliedSnapshot(void);
 const TestInput_Snapshot_t *TestInput_GetAppliedSnapshot(void);
 void TestInput_PublishMotion(JY61P_Data_t *target, uint32_t now_ms);
+uint32_t TestInput_GetPublishCount(void);
+/* TESTDBG only: return a scaled integer, or -2000000000 for invalid data. */
+int32_t TestInput_DebugScale(float value, uint16_t multiplier);
 
 #endif /* __TEST_INPUT_H */
