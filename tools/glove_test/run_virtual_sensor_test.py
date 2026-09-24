@@ -118,6 +118,34 @@ def _wait_for(port: Any, expected: str, timeout: float) -> list[str]:
     raise TestFailure(f"timeout waiting for {expected}; last={seen[-5:]}")
 
 
+def _send_with_retries(
+    port: Any,
+    command: str,
+    expected: str,
+    timeout: float,
+    attempts: int,
+    label: str,
+) -> list[str]:
+    if attempts < 1:
+        raise ValueError(f"{label} attempts must be at least 1")
+    for attempt in range(1, attempts + 1):
+        print(f"TX {command}")
+        port.write((command + "\n").encode("ascii"))
+        if hasattr(port, "flush"):
+            port.flush()
+        try:
+            return _wait_for(port, expected, timeout)
+        except TestFailure as error:
+            if not str(error).startswith("timeout waiting for ") or attempt == attempts:
+                raise
+            print(
+                f"WARN: {label} acknowledgement timed out; "
+                f"retrying ({attempt + 1}/{attempts})",
+                file=sys.stderr,
+            )
+    raise AssertionError("retry loop must return or raise")
+
+
 def _find_values(pattern: str, lines: Iterable[str]) -> tuple[str, ...] | None:
     regex = re.compile(pattern)
     for line in lines:
@@ -169,17 +197,42 @@ def _verify_telemetry(case: dict[str, Any], lines: list[str]) -> None:
         )
 
 
-def run_virtual_test(port: Any, case: dict[str, Any], timeout: float = 4.0) -> None:
+def run_virtual_test(
+    port: Any,
+    case: dict[str, Any],
+    timeout: float = 4.0,
+    settle_seconds: float = 0.75,
+    enter_attempts: int = 3,
+    enter_timeout: float = 1.5,
+    exit_attempts: int = 3,
+    exit_timeout: float = 1.0,
+) -> None:
+    if settle_seconds < 0:
+        raise ValueError("settle_seconds must not be negative")
+    if timeout <= 0 or enter_timeout <= 0 or exit_timeout <= 0:
+        raise ValueError("command timeouts must be positive")
+    if enter_attempts < 1 or exit_attempts < 1:
+        raise ValueError("ENTER and EXIT attempts must be at least 1")
+
     primary_error: BaseException | None = None
-    if hasattr(port, "reset_input_buffer"):
-        port.reset_input_buffer()
     try:
+        if settle_seconds:
+            time.sleep(settle_seconds)
+        if hasattr(port, "reset_input_buffer"):
+            port.reset_input_buffer()
+
         for command, expected in build_commands(case):
-            print(f"TX {command}")
-            port.write((command + "\n").encode("ascii"))
-            if hasattr(port, "flush"):
-                port.flush()
-            _wait_for(port, expected, timeout)
+            if command == "TEST:ENTER":
+                _send_with_retries(
+                    port, command, expected, enter_timeout,
+                    enter_attempts, "TEST:ENTER",
+                )
+            else:
+                print(f"TX {command}")
+                port.write((command + "\n").encode("ascii"))
+                if hasattr(port, "flush"):
+                    port.flush()
+                _wait_for(port, expected, timeout)
 
         deadline = time.monotonic() + timeout
         telemetry: list[str] = []
@@ -200,11 +253,10 @@ def run_virtual_test(port: Any, case: dict[str, Any], timeout: float = 4.0) -> N
         raise
     finally:
         try:
-            print("TX TEST:EXIT")
-            port.write(b"TEST:EXIT\n")
-            if hasattr(port, "flush"):
-                port.flush()
-            _wait_for(port, "[TEST] MODE=REAL", min(timeout, 2.0))
+            _send_with_retries(
+                port, "TEST:EXIT", "[TEST] MODE=REAL", exit_timeout,
+                exit_attempts, "TEST:EXIT",
+            )
         except Exception as exit_error:
             if primary_error is None:
                 raise TestFailure(
@@ -240,6 +292,11 @@ def main() -> int:
     parser.add_argument("--baud", type=int, default=9600)
     parser.add_argument("--case", type=Path, default=default_case)
     parser.add_argument("--timeout", type=float, default=4.0)
+    parser.add_argument("--settle-seconds", type=float, default=0.75)
+    parser.add_argument("--enter-timeout", type=float, default=1.5)
+    parser.add_argument("--enter-attempts", type=int, default=3)
+    parser.add_argument("--exit-timeout", type=float, default=1.0)
+    parser.add_argument("--exit-attempts", type=int, default=3)
     parser.add_argument("--list-ports", action="store_true")
     args = parser.parse_args()
 
@@ -255,7 +312,16 @@ def main() -> int:
         case = load_case(args.case)
         port = _open_port(args.port, args.baud, args.timeout)
         try:
-            run_virtual_test(port, case, args.timeout)
+            run_virtual_test(
+                port,
+                case,
+                timeout=args.timeout,
+                settle_seconds=args.settle_seconds,
+                enter_attempts=args.enter_attempts,
+                enter_timeout=args.enter_timeout,
+                exit_attempts=args.exit_attempts,
+                exit_timeout=args.exit_timeout,
+            )
         finally:
             port.close()
     except (OSError, ValueError, RuntimeError, TestFailure) as error:

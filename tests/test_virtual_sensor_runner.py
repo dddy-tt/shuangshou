@@ -15,9 +15,10 @@ SPEC.loader.exec_module(RUNNER)
 
 
 class FakeSerial:
-    def __init__(self, case, confirm_exit=True):
+    def __init__(self, case, confirm_exit=True, miss_responses=None):
         self.case = case
         self.confirm_exit = confirm_exit
+        self.miss_responses = dict(miss_responses or {})
         self.lines = []
         self.writes = []
 
@@ -39,6 +40,9 @@ class FakeSerial:
             "TEST:EXIT": "[TEST] MODE=REAL",
         }
         key = next(item for item in replies if command.startswith(item))
+        if self.miss_responses.get(key, 0) > 0:
+            self.miss_responses[key] -= 1
+            return len(payload)
         if key != "TEST:EXIT" or self.confirm_exit:
             self.lines.append((replies[key] + "\r\n").encode("ascii"))
         if key == "TEST:APPLY":
@@ -82,15 +86,70 @@ class RunnerTests(unittest.TestCase):
     def test_fake_serial_full_flow(self):
         case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
         serial = FakeSerial(case)
-        RUNNER.run_virtual_test(serial, case, timeout=0.1)
+        RUNNER.run_virtual_test(
+            serial, case, timeout=0.01, settle_seconds=0,
+            enter_timeout=0.01, exit_timeout=0.01,
+        )
         self.assertEqual(serial.writes[0], "TEST:ENTER")
         self.assertEqual(serial.writes[-1], "TEST:EXIT")
 
+    def test_enter_retries_timeout_then_continues_full_flow(self):
+        case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
+        serial = FakeSerial(case, miss_responses={"TEST:ENTER": 1})
+        RUNNER.run_virtual_test(
+            serial, case, timeout=0.01, settle_seconds=0,
+            enter_timeout=0.005, exit_timeout=0.005,
+        )
+        self.assertEqual(
+            [line for line in serial.writes if line == "TEST:ENTER"],
+            ["TEST:ENTER", "TEST:ENTER"],
+        )
+        self.assertTrue(any(line.startswith("TEST:FLEX|") for line in serial.writes))
+        self.assertIn("TEST:APPLY", serial.writes)
+
+    def test_enter_all_attempts_fail_and_no_case_commands_are_sent(self):
+        case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
+        serial = FakeSerial(case, miss_responses={"TEST:ENTER": 3})
+        with self.assertRaisesRegex(RUNNER.TestFailure, "MODE=VIRTUAL"):
+            RUNNER.run_virtual_test(
+                serial, case, timeout=0.01, settle_seconds=0,
+                enter_attempts=3, enter_timeout=0.003,
+                exit_attempts=1, exit_timeout=0.003,
+            )
+        self.assertEqual(
+            [line for line in serial.writes if line == "TEST:ENTER"],
+            ["TEST:ENTER"] * 3,
+        )
+        self.assertFalse(any(line.startswith("TEST:FLEX|") for line in serial.writes))
+        self.assertNotIn("TEST:APPLY", serial.writes)
+        self.assertEqual(serial.writes[-1], "TEST:EXIT")
+
+    def test_exit_retries_once_and_then_confirms_real_mode(self):
+        case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
+        serial = FakeSerial(case, miss_responses={"TEST:EXIT": 1})
+        RUNNER.run_virtual_test(
+            serial, case, timeout=0.01, settle_seconds=0,
+            enter_timeout=0.005, exit_attempts=3, exit_timeout=0.005,
+        )
+        self.assertEqual(
+            [line for line in serial.writes if line == "TEST:EXIT"],
+            ["TEST:EXIT", "TEST:EXIT"],
+        )
+
     def test_exit_must_be_confirmed_for_pass(self):
         case = RUNNER.load_case(ROOT / "tests" / "cases" / "mixed.json")
-        serial = FakeSerial(case, confirm_exit=False)
+        serial = FakeSerial(
+            case, confirm_exit=False, miss_responses={"TEST:EXIT": 3}
+        )
         with self.assertRaisesRegex(RUNNER.TestFailure, "TEST:EXIT was not confirmed"):
-            RUNNER.run_virtual_test(serial, case, timeout=0.01)
+            RUNNER.run_virtual_test(
+                serial, case, timeout=0.01, settle_seconds=0,
+                enter_timeout=0.005, exit_attempts=3, exit_timeout=0.003,
+            )
+        self.assertEqual(
+            [line for line in serial.writes if line == "TEST:EXIT"],
+            ["TEST:EXIT"] * 3,
+        )
 
 
 if __name__ == "__main__":

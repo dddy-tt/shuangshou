@@ -43,6 +43,7 @@
 #include "alarm.h"
 #include "alarm_session.h"
 #include "test_input.h"
+#include "usart3_rx.h"
 #include "math.h"
 #include "stdio.h"
 #include "string.h"
@@ -73,6 +74,9 @@
 #define BLUETOOTH_DIAG_PERIOD_MS          1000U
 #define BRINGUP_DIAG_PERIOD_MS            5000U
 #define JY_RECOVERY_PERIOD_MS          500U
+#define TEST_ACK_QUEUE_DEPTH                 4U
+#define TEST_ACK_MAX_LENGTH                 80U
+#define TEST_ACK_RETRY_PERIOD_MS             20U
 
 /* 当前硬件配置：启用右手 JY61P，关闭左手 JY61P，关闭 DFPlayer，启用蜂鸣器。 */
 #define JY61P_RIGHT_ENABLE 1U
@@ -130,8 +134,16 @@ static uint32_t t_bringup_diag = 0;
 /* 全局系统 tick，由 TIM3 1ms 中断递增 */
 volatile uint32_t sys_tick_ms = 0;
 
-/* UART3 中断接收单字节缓冲 */
-static volatile uint8_t uart3_rx_byte;
+/* TEST ACK 暂存独立于报警 TX 队列；普通 TX 队列满时延后重试。 */
+static char test_ack_queue[TEST_ACK_QUEUE_DEPTH][TEST_ACK_MAX_LENGTH];
+static uint8_t test_ack_head = 0U;
+static uint8_t test_ack_tail = 0U;
+static uint8_t test_ack_count = 0U;
+static uint32_t test_ack_retry_count = 0U;
+static uint32_t test_ack_drop_count = 0U;
+static uint32_t test_ack_last_try_ms = 0U;
+static uint8_t test_ack_try_seen = 0U;
+static char uart3_rx_diag_line[256];
 
 /* MAX30102 初始化状态 */
 static uint8_t max30102_present = 0;  /* 1 = 设备在线且初始化成功 */
@@ -245,6 +257,54 @@ static void TestInput_MainPublishFlex(void)
         right->history_index = (uint8_t)((right->history_index + 1U) %
                                          HISTORY_SIZE);
     }
+}
+
+static void TestInput_MainQueueAck(const char *line)
+{
+    size_t length;
+    uint8_t next_head;
+
+    if (line == 0) {
+        test_ack_drop_count++;
+        return;
+    }
+    length = strlen(line);
+    if (length == 0U || length >= TEST_ACK_MAX_LENGTH ||
+        test_ack_count >= TEST_ACK_QUEUE_DEPTH) {
+        test_ack_drop_count++;
+        return;
+    }
+
+    memcpy(test_ack_queue[test_ack_head], line, length + 1U);
+    next_head = (uint8_t)(test_ack_head + 1U);
+    if (next_head >= TEST_ACK_QUEUE_DEPTH) next_head = 0U;
+    test_ack_head = next_head;
+    test_ack_count++;
+}
+
+static void TestInput_MainServiceAcks(uint32_t now_ms)
+{
+    uint8_t next_tail;
+
+    if (test_ack_count == 0U) return;
+    if (test_ack_try_seen != 0U &&
+        (uint32_t)(now_ms - test_ack_last_try_ms) <
+        TEST_ACK_RETRY_PERIOD_MS) {
+        return;
+    }
+    test_ack_try_seen = 1U;
+    test_ack_last_try_ms = now_ms;
+
+    if (BT_SendString(test_ack_queue[test_ack_tail]) == 0U) {
+        test_ack_retry_count++;
+        return;
+    }
+
+    test_ack_queue[test_ack_tail][0] = '\0';
+    next_tail = (uint8_t)(test_ack_tail + 1U);
+    if (next_tail >= TEST_ACK_QUEUE_DEPTH) next_tail = 0U;
+    test_ack_tail = next_tail;
+    test_ack_count--;
 }
 
 /* USER CODE END 0 */
@@ -378,8 +438,8 @@ int main(void)
   }
   BringupDiag_RecomputeDegraded();
 
-  /* 阶段 6：启动 UART3 单字节中断接收 */
-  HAL_UART_Receive_IT(&huart3, (uint8_t *)&uart3_rx_byte, 1);
+  /* 阶段 6：启动可恢复的 UART3 单字节中断接收。 */
+  (void)USART3_RxStart();
   BT_SendString("BOOT:C63AFB5\r\n");
   /* 诊断帧走同一条普通队列；主循环还会周期重发，不能依赖此一次。 */
   (void)BringupDiag_TrySend();
@@ -399,11 +459,14 @@ int main(void)
   {
     uint32_t now = sys_tick_ms;
 
+    USART3_RxService(now);
+
     /* 推进蓝牙发送队列；该调用不等待 UART。 */
     BT_TxService();
+    TestInput_MainServiceAcks(now);
 
     if (TestInput_Service(now) != 0U) {
-        BT_SendString("[TEST] MODE=REAL|REASON=TIMEOUT\r\n");
+        TestInput_MainQueueAck("[TEST] MODE=REAL|REASON=TIMEOUT\r\n");
     }
 
     if (alarm_buzzer_active != 0U &&
@@ -554,8 +617,32 @@ int main(void)
         char bt_line[BT_RX_BUF_SIZE];
 
         if ((uint32_t)(now - t_bringup_diag) >= BRINGUP_DIAG_PERIOD_MS) {
+            BT_RxDiagnostics_t bt_rx_diag;
+            USART3_RxDiagnostics_t uart3_rx_diag;
+
             t_bringup_diag = now;
             (void)BringupDiag_TrySend();
+            BT_RxGetDiagnostics(&bt_rx_diag);
+            USART3_RxGetDiagnostics(&uart3_rx_diag);
+            (void)snprintf(uart3_rx_diag_line, sizeof(uart3_rx_diag_line),
+                "UART3_RX|BYTES=%lu|LINES=%lu|LINE_DROP=%lu|RESET=%lu|LONG=%lu|"
+                "ERR=%lu|ORE=%lu|FE=%lu|NE=%lu|PE=%lu|RECOVER=%lu|"
+                "ARMFAIL=%lu|ACK_RETRY=%lu|ACK_DROP=%lu\r\n",
+                (unsigned long)uart3_rx_diag.bytes_received,
+                (unsigned long)bt_rx_diag.lines_received,
+                (unsigned long)bt_rx_diag.lines_dropped,
+                (unsigned long)bt_rx_diag.partial_resets,
+                (unsigned long)bt_rx_diag.overlong_lines,
+                (unsigned long)uart3_rx_diag.errors,
+                (unsigned long)uart3_rx_diag.overrun_errors,
+                (unsigned long)uart3_rx_diag.framing_errors,
+                (unsigned long)uart3_rx_diag.noise_errors,
+                (unsigned long)uart3_rx_diag.parity_errors,
+                (unsigned long)uart3_rx_diag.recoveries,
+                (unsigned long)uart3_rx_diag.rearm_failures,
+                (unsigned long)test_ack_retry_count,
+                (unsigned long)test_ack_drop_count);
+            (void)BT_SendString(uart3_rx_diag_line);
         }
 
         /* 保持双手全弯 3 秒切换模式，并播放模式提示音 */
@@ -624,7 +711,7 @@ int main(void)
             if (TestInput_HandleLine(bt_line, now, test_response,
                                      sizeof(test_response)) ==
                 TEST_INPUT_HANDLED) {
-                BT_SendString(test_response);
+                TestInput_MainQueueAck(test_response);
             } else {
 #if DFPLAYER_ENABLE
             uint16_t file_num = 0U;
@@ -953,19 +1040,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
     if (htim->Instance == TIM3) {
         sys_tick_ms++;
-    }
-}
-
-/*
- * USART3 接收完成回调：蓝牙单字节非阻塞接收。
- * 先重新挂接 HAL_UART_Receive_IT，再消费字节，避免回调期间丢下一个字节。
- */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart->Instance == USART3) {
-        uint8_t byte = uart3_rx_byte;
-        HAL_UART_Receive_IT(&huart3, (uint8_t *)&uart3_rx_byte, 1);
-        BT_RxCallback(byte);
     }
 }
 

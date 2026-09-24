@@ -18,6 +18,13 @@
 #define BT_CMD_SENS_2   4   /* 中灵敏度 */
 #define BT_CMD_SENS_3   5   /* 低灵敏度 */
 
+typedef struct {
+    uint32_t lines_received;
+    uint32_t lines_dropped;
+    uint32_t partial_resets;
+    uint32_t overlong_lines;
+} BT_RxDiagnostics_t;
+
 void BT_Init(void);
 
 /*
@@ -62,5 +69,9 @@ const char *BT_GetLastString(void);
  * 返回 1 = 成功取到，0 = 当前没有新字符串命令
  */
 uint8_t BT_FetchLastString(char *out, uint16_t out_len);
+
+/* UART 错误后丢弃当前受损行至 LF；已入队完整行及全部 TX 状态保留。 */
+void BT_ResetRxAssembler(void);
+void BT_RxGetDiagnostics(BT_RxDiagnostics_t *out);
 
 #endif /* __BLUETOOTH_H */

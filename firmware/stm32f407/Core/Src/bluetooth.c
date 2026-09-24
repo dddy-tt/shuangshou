@@ -40,6 +40,8 @@ static volatile uint8_t cmd_pending = BT_CMD_NONE;
 /* 字符串命令缓冲（只由接收 ISR 访问）。 */
 static char    str_buf[BT_RX_BUF_SIZE];
 static uint8_t str_idx = 0U;
+static uint8_t rx_discard_until_lf = 0U;
+static BT_RxDiagnostics_t rx_diagnostics;
 
 /* BT_GetLastString 返回最近一次被主循环取出的完整行。 */
 static char last_string[BT_RX_BUF_SIZE];
@@ -200,6 +202,7 @@ void BT_Init(void)
     memset(rx_line_queue, 0, sizeof(rx_line_queue));
     memset(str_buf, 0, BT_RX_BUF_SIZE);
     memset(last_string, 0, BT_RX_BUF_SIZE);
+    memset(&rx_diagnostics, 0, sizeof(rx_diagnostics));
     rx_line_head = 0U;
     rx_line_tail = 0U;
     rx_line_count = 0U;
@@ -218,6 +221,7 @@ void BT_Init(void)
     tx_inflight_priority = 0U;
     tx_busy = 0U;
     str_idx = 0U;
+    rx_discard_until_lf = 0U;
     cmd_pending = BT_CMD_NONE;
     bt_irq_restore(primask);
 }
@@ -302,7 +306,10 @@ static void bt_rx_publish_line(void)
     uint8_t next_head;
 
     /* RX ISR 不覆盖尚未消费的 ACK；队列满时丢弃整行，客户端会重发。 */
-    if (rx_line_count >= BT_RX_LINE_QUEUE_DEPTH) return;
+    if (rx_line_count >= BT_RX_LINE_QUEUE_DEPTH) {
+        rx_diagnostics.lines_dropped++;
+        return;
+    }
 
     memcpy(rx_line_queue[rx_line_head], str_buf,
            (uint16_t)str_idx + 1U);
@@ -315,6 +322,15 @@ static void bt_rx_publish_line(void)
 /* ── 接收中断回调 ── */
 void BT_RxCallback(uint8_t byte)
 {
+    if (rx_discard_until_lf != 0U) {
+        if (byte == '\n') {
+            rx_discard_until_lf = 0U;
+            str_idx = 0U;
+            str_buf[0] = '\0';
+        }
+        return;
+    }
+
     /* 只把独立单字符命令识别为灵敏度切换；ALARM_ACK 等文本中的
        数字不能意外改动手势灵敏度。 */
     if (str_idx == 0U && byte >= '1' && byte <= '3') {
@@ -325,12 +341,17 @@ void BT_RxCallback(uint8_t byte)
     if (str_idx < (BT_RX_BUF_SIZE - 1U)) {
         str_buf[str_idx++] = (char)byte;
     } else {
-        /* 保留终止符位置；过长输入会作为一行丢弃/拒绝，不覆盖邻帧。 */
-        str_idx = BT_RX_BUF_SIZE - 1U;
+        rx_diagnostics.overlong_lines++;
+        str_idx = 0U;
+        str_buf[0] = '\0';
+        /* 若溢出的当前字节本身就是 LF，本行已结束，不吞掉下一行。 */
+        rx_discard_until_lf = (byte == '\n') ? 0U : 1U;
+        return;
     }
 
-    if (byte == '\n' || str_idx >= (BT_RX_BUF_SIZE - 1U)) {
+    if (byte == '\n') {
         str_buf[str_idx] = '\0';
+        rx_diagnostics.lines_received++;
 
         if (strstr(str_buf, "<CAL:MIN>")) {
             cmd_pending = BT_CMD_CAL_MIN;
@@ -342,6 +363,30 @@ void BT_RxCallback(uint8_t byte)
         str_idx = 0U;
         str_buf[0] = '\0';
     }
+}
+
+void BT_ResetRxAssembler(void)
+{
+    uint32_t primask = bt_irq_save();
+
+    if (str_idx != 0U || rx_discard_until_lf != 0U) {
+        rx_diagnostics.partial_resets++;
+    }
+    str_idx = 0U;
+    str_buf[0] = '\0';
+    /* 错误字节已被丢弃；继续丢弃其余尾部，直到重新同步到行边界。 */
+    rx_discard_until_lf = 1U;
+    bt_irq_restore(primask);
+}
+
+void BT_RxGetDiagnostics(BT_RxDiagnostics_t *out)
+{
+    uint32_t primask;
+
+    if (out == 0) return;
+    primask = bt_irq_save();
+    *out = rx_diagnostics;
+    bt_irq_restore(primask);
 }
 
 uint8_t BT_GetCommand(void)

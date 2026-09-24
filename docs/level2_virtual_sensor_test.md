@@ -36,15 +36,22 @@ python tools/glove_test/run_virtual_sensor_test.py --port COM5
 python tools/glove_test/run_virtual_sensor_test.py --port COM5 --case tests/cases/all_bent.json
 ```
 
-Runner 逐条等待 STM32 ACK，APPLY 后必须同时看到且比对通过正式 `FLEX`、`IMU`、`ACC` 三种遥测，最后无论成功失败都会尝试发送 `TEST:EXIT`。
+Runner 打开串口后默认等待 0.75 秒，再清理旧输入；`TEST:ENTER` 最多发送 3 次、每次等待 1.5 秒。只有收到 `[TEST] MODE=VIRTUAL` 才继续发送 case 命令。普通 case ACK 与 APPLY 后正式 `FLEX`、`IMU`、`ACC` 遥测仍逐项严格验证，不会把普通遥测当作 ENTER ACK。最后无论成功失败，`TEST:EXIT` 最多尝试 3 次、每次等待 1 秒；仍无 `[TEST] MODE=REAL` 时 Runner 不会报告 PASS。
+
+可通过 `--settle-seconds`、`--enter-timeout`、`--enter-attempts`、`--exit-timeout`、`--exit-attempts` 调整等待；默认参数适用于当前 9600 baud USART3。
+
+固件每 5 秒输出一条 `UART3_RX|...` 统计，见 [protocol.md](protocol.md#usart3-rx-诊断帧)。`BYTES=0` 表示尚无单字节接收完成回调；`BYTES` 增长但 `LINES=0` 通常指向换行未到达、接收错误或输入格式/速率问题；`ERR/RECOVER/ARMFAIL` 用于观察 HAL 错误恢复；`LINE_DROP` 和 `ACK_RETRY/ACK_DROP` 分别对应 RX 完整行和 TEST ACK 发送队列阶段。
 
 ## 软件测试
 
 ```powershell
 gcc -std=c99 -Wall -Wextra -Werror -Ifirmware/stm32f407/Core/Inc firmware/stm32f407/Core/Src/test_input.c firmware/stm32f407/tests/test_input_test.c -lm -o firmware/stm32f407/tests/test_input_test.exe
 firmware/stm32f407/tests/test_input_test.exe
+gcc -std=c99 -Wall -Wextra -Werror -Ifirmware/stm32f407/Core/Inc firmware/stm32f407/tests/usart3_rx_test.c -lm -o firmware/stm32f407/tests/usart3_rx_test.exe
+firmware/stm32f407/tests/usart3_rx_test.exe
 python -m unittest tests/test_virtual_sensor_runner.py -v
 powershell -NoProfile -ExecutionPolicy Bypass -File firmware/stm32f407/tests/test_input_wiring_test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File firmware/stm32f407/tests/usart3_rx_wiring_test.ps1
 ```
 
 ## Level 3 接入点

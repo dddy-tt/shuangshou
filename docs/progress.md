@@ -437,3 +437,42 @@
 ### 真机待测
 
 - 烧录最新 HEX 后，运行 `python tools/glove_test/run_virtual_sensor_test.py --port COM15`；正式 IMU telemetry 应输出约 `R=10.00|P=-5.00|Y=2.00`。
+
+## 2026-09-24 - Level 2 USART3 RX 自恢复与 Runner 重试
+
+### 已完成
+
+- 新增独立 `usart3_rx.c/.h` 管理 USART3 单字节 HAL RX、错误分类、重挂接失败后的 20ms 有限频率重试；`main.c` 不再直接拥有 RX 缓冲和完成回调。
+- 按 STM32F4 HAL 实际语义恢复：ORE 由 HAL 结束当前接收并置 READY，错误回调清标志后重挂接；FE/NE/PE 若 RX 仍为 BUSY_RX，则不重复启动/中止正在进行的 RX。RX 完成回调会在 HAL 清 ErrorCode 前捕获错误，错误字节不进入组帧器。
+- 增加 `BT_ResetRxAssembler()`：保留已入队完整命令和所有 TX 队列，丢弃当前受损行的尾部直至 LF 后再恢复组帧。增加 RX 完整行丢弃、超长行、UART 错误/恢复和接收重挂接计数，并修复 LF 正好落在组帧容量边界时误吞下一行的问题。
+- TEST ACK 暂存于独立小队列；普通 TX 队列满时每 20ms 重试，仍走普通 TX、不挤占报警优先级。每 5 秒低频输出 `UART3_RX|...` 诊断帧。
+- Python Runner 打开串口后默认 settle 0.75 秒再清旧输入；ENTER 最多 3 次、每次 1.5 秒；EXIT 最多 3 次、每次 1 秒。没有收到明确 MODE ACK 不继续测试，也不会把遥测当 ACK；EXIT 未确认不能 PASS。
+
+### 修改文件
+
+- `firmware/stm32f407/Core/Inc/bluetooth.h`
+- `firmware/stm32f407/Core/Src/bluetooth.c`
+- `firmware/stm32f407/Core/Inc/usart3_rx.h`
+- `firmware/stm32f407/Core/Src/usart3_rx.c`
+- `firmware/stm32f407/Core/Src/main.c`
+- `firmware/stm32f407/MDK-ARM/shuangshou.uvprojx`
+- `firmware/stm32f407/tests/usart3_rx_test.c`
+- `firmware/stm32f407/tests/usart3_rx_wiring_test.ps1`
+- `tests/test_virtual_sensor_runner.py`
+- `tools/glove_test/run_virtual_sensor_test.py`
+- `docs/protocol.md`
+- `docs/level2_virtual_sensor_test.md`
+- `firmware/stm32f407/tests/README.md`
+
+### 验证
+
+- 固件 host C 测试通过：`alarm_engine_test`、`bluetooth_tx_test`、`jy61p_zero_filter_test`、`test_input_test`、新增 `usart3_rx_test`。
+- 静态接线测试通过：`alarm_wiring_test.ps1`、`test_input_wiring_test.ps1`、新增 `usart3_rx_wiring_test.ps1`。
+- Python Runner：`python tests/test_virtual_sensor_runner.py`，7 项通过；包含 ENTER 首次超时后成功、ENTER 全部失败不下发 case、EXIT 重试和 EXIT 未确认不得 PASS。
+- Keil μVision 5.41 / ARM Compiler 5.06u6 对 `firmware/stm32f407/MDK-ARM/shuangshou.uvprojx` 实际 Build：`0 Error(s), 0 Warning(s)`，成功生成 HEX；未烧录开发板。
+
+### 真机待验证
+
+- 重新烧录此次固件后运行 `python tools/glove_test/run_virtual_sensor_test.py --port COM15`。
+- 检查先出现 `[TEST] MODE=VIRTUAL`，再出现 FLEX/IMU/ACC/APPLY ACK 与正式遥测；观察 `UART3_RX` 的 `BYTES/LINES/ERR/RECOVER/ARMFAIL/ACK_RETRY/ACK_DROP`。
+- 软件模拟不能验证 USB-TTL 实际方向、电平、地线、PC11 电气噪声或现场错误率；这些仍需 COM15 真机结果确认。本次没有修改小程序、CubeMX `.ioc`、引脚或 TEST 协议。

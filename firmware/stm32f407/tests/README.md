@@ -32,3 +32,21 @@ tests/test_input_test.exe
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tests/test_input_wiring_test.ps1
 ```
+
+## USART3 RX recovery and end-to-end TEST command path
+
+`usart3_rx_test.c` compiles the production `usart3_rx.c`, `bluetooth.c`, and
+`test_input.c` with a small HAL mock. It exercises one-byte rearming, ORE
+recovery, nonblocking FE/NE/PE handling, partial-line discard while preserving
+completed lines, the full `TEST:ENTER` through `TEST:APPLY` parser path, and
+rate-limited retry after a failed HAL rearm:
+
+```text
+gcc -std=c99 -Wall -Wextra -Werror -ICore/Inc tests/usart3_rx_test.c -lm -o tests/usart3_rx_test.exe
+tests/usart3_rx_test.exe
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/usart3_rx_wiring_test.ps1
+```
+
+The host test does not emulate electrical line noise or replace a real STM32
+HAL/USB-TTL test. The wiring guard additionally checks the bundled STM32F4 HAL
+ORE handling and Keil project source registration.

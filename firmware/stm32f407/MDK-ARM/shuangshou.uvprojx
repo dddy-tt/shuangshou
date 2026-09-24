@@ -575,6 +575,11 @@
               <FilePath>..\Core\Src\test_input.c</FilePath>
             </File>
             <File>
+              <FileName>usart3_rx.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Core\Src\usart3_rx.c</FilePath>
+            </File>
+            <File>
               <FileName>bringup_diag.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Core\Src\bringup_diag.c</FilePath>
