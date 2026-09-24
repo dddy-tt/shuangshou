@@ -27,6 +27,8 @@ REAL 与 VIRTUAL 只在传感器输入边界不同。固件上电固定为 REAL�
 
 串口参数：`9600, 8N1`，3.3V TTL。不要用 USB-TTL 的 VCC 给开发板供电。
 
+ST-Link 与 USB-TTL 可以同时连接开发板：ST-Link 用于 Build 后下载/复位，USB-TTL 通过 USART3 执行 TEST 命令。测试时仍必须断开 JDY-23，避免它与 USB-TTL 同时驱动 PC11/USART3_RX。
+
 ## 使用
 
 ```powershell
@@ -95,4 +97,4 @@ Runner 会直接打印 `[TESTDBG]`、正式 `IMU|...`、`ACC|...` 和最终 FAIL
 
 ## Level 3 接入点
 
-Level 3 可在 Runner 外层增加两个步骤：调用 Keil 命令行构建 `firmware/stm32f407/MDK-ARM/shuangshou.uvprojx`，再调用 ST-Link CLI 烧录生成的 HEX。Level 2 的 TEST 协议、case 文件和串口判定逻辑无需重写。
+本地完整自动化入口和参数见 [Level 3 硬件一键测试](level3_hardware_test.md)。Level 3 只在外层调用 Keil、STM32 Programmer CLI 和本文件中的现有 Runner；TEST 协议、case 文件、遥测收敛与 EXIT 判定仍由 Level 2 负责。

@@ -19,6 +19,7 @@
 DebugConfig/
 firmware/stm32f407/tests/*.exe
 firmware/stm32f407/MDK-ARM/*.log
+artifacts/hardware_test/
 
 # PlatformIO / Node caches
 .pio/

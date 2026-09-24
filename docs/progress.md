@@ -1,5 +1,33 @@
 # Mini Program Progress
 
+## 2026-09-24 - Level 3 本地硬件一键测试（已完成）
+
+### 已完成
+
+- 已确认应在 `E:\DATA\STM32\cubemx\new glove` 的当前 Level 2 仓库继续；旧检出不包含 Level 2 Runner，因此未在旧工程 Build/Flash。
+- 已确认本机 COM15 是 USB-SERIAL CH340、COM8 是 ST-Link VCP；STM32CubeProgrammer `-l` 只读枚举到一个 ST-Link，序列号 `00430052310000024E593053`。
+- 已新增 Level 3 设计/接线说明，并明确 ST-Link 与 USB-TTL 可同时连接、运行 TEST 时必须断开 JDY-23。
+- 已确认 Level 3 将调用现有 Python Runner，不重写 Level 2 协议、telemetry convergence 或 EXIT 校验。
+- 新增 `tools/glove_test/test_hardware.py` 一键编排器及 `tests/test_hardware.py` mock 单测；新增 `artifacts/hardware_test/` 忽略规则。
+- Level 2 接线说明链接到 Level 3 文档，记录 USB-TTL / ST-Link / JDY-23 的连接约束。
+
+### 验收结果
+
+- 全量 Python 回归：29/29 通过；Level 3 文件 `py_compile` 通过。
+- 固件 host C tests：`alarm_engine_test`、`bluetooth_tx_test`、`jy61p_zero_filter_test`、`test_input_test`、`usart3_rx_test` 全部通过；3 个 PowerShell wiring/static tests 全部通过。
+- Keil 使用 `E:\Keil5\Local\Keil_v5\UV4\UV4.exe` 对 `firmware/stm32f407/MDK-ARM/shuangshou.uvprojx` 执行 Rebuild All：`0 Error(s), 0 Warning(s)`，并校验 HEX 在本次构建后更新。
+- 使用 `E:\download\bin\STM32_Programmer_CLI.exe` 和唯一探针 `00430052310000024E593053` 下载本项目 HEX；CLI 返回码 0，`Download verified successfully`、`MCU Reset`、`Core run` 均已确认，未执行 mass erase。
+- COM15 / 9600 真机 case：`all_bent.json`、`all_straight.json`、`mixed.json`、`normal.json` 全部 PASS；每个 case 确认退出到 `MODE=REAL`。
+- 4 次 stack watermark 均为 `SIZE=4096 USED=984 FREE=3112 GUARD=1`。
+- 最终一键命令 `python tools/glove_test/test_hardware.py --port COM15` 返回 exit code 0，结果 `LEVEL 3 PASS`。
+- 本轮完整日志：`artifacts/hardware_test/20260924_221846_719540_46912/`。
+
+### 已知边界
+
+- 此 PASS 验证的是当前 Windows、Keil、ST-Link、USB-TTL 与 STM32 板上的自动构建/烧录/协议虚拟传感器闭环；未验证 JDY-23 BLE、小程序、传感器实际模拟量或临床/医疗有效性。
+- 每次实测前仍需确认 USB-TTL 接 USART3、COM15 未被其他程序占用，并断开 JDY-23 的 TX，避免与 USB-TTL 同时驱动 PC11/RX。
+- 本地用户改动 `miniprogram/project.config.json` 和未跟踪文件 `python` 保持未动、未纳入提交。
+
 ## 2026-09-23 - 微信小程序虚拟手套测试系统
 
 ### 已完成
