@@ -42,6 +42,7 @@
 #include "soft_uart.h"
 #include "alarm.h"
 #include "alarm_session.h"
+#include "test_input.h"
 #include "math.h"
 #include "stdio.h"
 #include "string.h"
@@ -220,6 +221,70 @@ static void Alarm_MainStopBuzzer(void)
     alarm_buzzer_active = 0U;
 }
 
+static int16_t TestInput_MainFloatToRaw(float value, float scale)
+{
+    float raw = value / scale;
+
+    if (raw > 32767.0f) return 32767;
+    if (raw < -32768.0f) return -32768;
+    return (int16_t)raw;
+}
+
+static void TestInput_MainPublishMotion(uint32_t now_ms)
+{
+    const TestInput_Snapshot_t *snapshot = TestInput_GetAppliedSnapshot();
+    uint8_t i;
+
+    if (snapshot == 0) return;
+
+    for (i = 0U; i < 3U; i++) {
+        JY61P_Right.acc[i] = snapshot->acc[i];
+        JY61P_Right.acc_raw[i] = TestInput_MainFloatToRaw(
+            snapshot->acc[i], JY61P_ACC_SCALE);
+        JY61P_Right.gyro[i] = 0.0f;
+        JY61P_Right.gyro_raw[i] = 0;
+        JY61P_Right.angle[i] = snapshot->angle[i];
+        JY61P_Right.angle_raw[i] = TestInput_MainFloatToRaw(
+            snapshot->angle[i], JY61P_ANGLE_SCALE);
+    }
+    JY61P_Right.online = 1U;
+    JY61P_Right.error_streak = 0U;
+    JY61P_Right.last_error = 0U;
+    JY61P_Right.acc_valid = snapshot->acc_valid;
+    JY61P_Right.angle_valid = 1U;
+    JY61P_Right.acc_sample_seen = 1U;
+    JY61P_Right.angle_sample_seen = 1U;
+    JY61P_Right.angle_zero_streak = 0U;
+    JY61P_Right.acc_updated_ms = now_ms;
+    JY61P_Right.angle_updated_ms = now_ms;
+}
+
+static void TestInput_MainPublishFlex(void)
+{
+    const TestInput_Snapshot_t *snapshot = TestInput_GetAppliedSnapshot();
+    uint8_t i;
+
+    if (snapshot == 0) return;
+
+    for (i = 0U; i < FINGER_NUM; i++) {
+        Flex_Finger_t *left = &Hand_Left[i];
+        Flex_Finger_t *right = &Hand_Right[i];
+
+        left->pos_percent = snapshot->flex[i];
+        right->pos_percent = snapshot->flex[FINGER_NUM + i];
+        left->current_raw = (uint16_t)(((uint32_t)left->pos_percent *
+                                        4095U) / 100U);
+        right->current_raw = (uint16_t)(((uint32_t)right->pos_percent *
+                                         4095U) / 100U);
+        left->history_buffer[left->history_index] = left->pos_percent;
+        left->history_index = (uint8_t)((left->history_index + 1U) %
+                                        HISTORY_SIZE);
+        right->history_buffer[right->history_index] = right->pos_percent;
+        right->history_index = (uint8_t)((right->history_index + 1U) %
+                                         HISTORY_SIZE);
+    }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -323,6 +388,7 @@ int main(void)
   DFPlayer_Init();     /* DFPlayer 上电，默认音量 25 */
 #endif
   BT_Init();           /* 蓝牙接收缓冲和协议解析器初始化 */
+  TestInput_Init();    /* 默认 REAL；只有明确 TEST:ENTER 才进入虚拟输入。 */
   Vibrator_Init();     /* TIM4 PWM 双通道启动，占空比先置 0 */
 #if BUZZER_ENABLE
   /* 该模块为低电平触发：先预置高电平和 100% 高占空比，再使能 PWM。 */
@@ -374,6 +440,10 @@ int main(void)
     /* 推进蓝牙发送队列；该调用不等待 UART。 */
     BT_TxService();
 
+    if (TestInput_Service(now) != 0U) {
+        BT_SendString("[TEST] MODE=REAL|REASON=TIMEOUT\r\n");
+    }
+
     if (alarm_buzzer_active != 0U &&
         (uint32_t)(now - alarm_buzzer_started_ms) >=
         ALARM_LOCAL_BUZZER_TIMEOUT_MS) {
@@ -396,6 +466,9 @@ int main(void)
     if (now - t_jy_poll >= 10U) {
         t_jy_poll = now;
         float acc[3], gyro[3], angle[3];
+        if (TestInput_GetSource() == TEST_INPUT_SOURCE_VIRTUAL) {
+            TestInput_MainPublishMotion(now);
+        } else {
         /*
          * Do not access an IMU which failed its power-on probe. An absent I2C
          * device can keep each transaction waiting for its timeout, starving
@@ -415,6 +488,7 @@ int main(void)
             JY61P_Read_Data(JY61P_CH_LEFT, acc, gyro, angle);
         }
 #endif
+        }
     }
 #endif
 
@@ -476,8 +550,12 @@ int main(void)
     /* 任务 3：20ms / 50Hz，仅更新 Flex 数据；Flex 不参与蜂鸣器报警。 */
     if (now - t_20ms >= 20U) {
         t_20ms = now;
-        /* v2.4 起改为 Ping-Pong 快照，Flex_Update 内部读取稳定半缓冲区 */
-        Flex_Update();
+        if (TestInput_GetSource() == TEST_INPUT_SOURCE_VIRTUAL) {
+            TestInput_MainPublishFlex();
+        } else {
+            /* v2.4 起改为 Ping-Pong 快照，内部读取稳定半缓冲区。 */
+            Flex_Update();
+        }
     }
 
     /* 任务 4：50ms / 20Hz，手势识别 + 振动维护 */
@@ -579,6 +657,13 @@ int main(void)
         }
 
         if (BT_FetchLastString(bt_line, sizeof(bt_line))) {
+            char test_response[80];
+
+            if (TestInput_HandleLine(bt_line, now, test_response,
+                                     sizeof(test_response)) ==
+                TEST_INPUT_HANDLED) {
+                BT_SendString(test_response);
+            } else {
 #if DFPLAYER_ENABLE
             uint16_t file_num = 0U;
             unsigned volume = 0U;
@@ -623,6 +708,7 @@ int main(void)
                         Alarm_MainRetryClear();
                     }
                 }
+            }
             }
         }
 

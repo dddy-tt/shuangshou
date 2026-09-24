@@ -15,11 +15,15 @@
 *.uvoptx
 *.bak
 DebugConfig/
+firmware/stm32f407/tests/*.exe
+firmware/stm32f407/MDK-ARM/*.log
 
 # PlatformIO / Node caches
 .pio/
 node_modules/
 .planning/
+__pycache__/
+*.pyc
 npm-debug.log*
 
 # WeChat Developer Tools local state

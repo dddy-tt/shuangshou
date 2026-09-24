@@ -394,3 +394,26 @@
 ### 真机待测
 
 - 必须重新烧录本次固件；真机串口应在偶发毛刺时看到 `JY ... LAST=16`，但 `IMU` 三轴继续保持上一帧，不再跳 0。
+
+## 2026-09-24 - Level 2 STM32 虚拟传感器自动测试
+
+### 已完成
+
+- 新增默认 REAL 的 `test_input` 状态机；只有收到 `TEST:ENTER` 才进入 VIRTUAL，`TEST:EXIT` 或 5 秒无合法测试活动自动恢复 REAL。
+- TEST parser 严格校验完整 10 路 FLEX、IMU、ACC、VALID 和有限数范围；只有三类输入齐全后 `TEST:APPLY` 才原子提交，非法输入不覆盖已应用快照。
+- VIRTUAL 数据写入既有 `Hand_Left/Hand_Right` 和 `JY61P_Right` 运行时结构；原 Gesture、Alarm 和正式 FLEX/IMU/ACC 遥测继续使用同一套业务代码。
+- 复用 USART3 完整行接收队列，不修改 `.ioc` 或引脚。测试时断开 JDY-23，由 USB-TTL 独占 PC10 TX / PC11 RX / GND，9600 8N1。
+- 新增 Python Runner、4 个 JSON cases、fake-serial 自动测试和固件接线静态守卫。
+- 更新协议、固件测试说明和 Level 2 操作文档。
+
+### 验证
+
+- Keil UV4 使用 ARM Compiler 5.06u6 完整 Build：`0 Error(s), 0 Warning(s)`，生成 HEX；未烧录开发板。
+- `test_input_test`、`alarm_engine_test`、`bluetooth_tx_test`、`jy61p_zero_filter_test`、`alarm_wiring_test`、`test_input_wiring_test` 全部通过。
+- Python Runner 4 项 unittest 通过，覆盖全部 case 校验、非法 case、fake serial 完整闭环及 EXIT 未确认不得 PASS。
+- 小程序原有 Node 回归 28/28 通过；本阶段没有修改小程序产品代码。
+
+### 仍待真机验证
+
+- 手动烧录最新 HEX 后，用 USB-TTL 运行 `python tools/glove_test/run_virtual_sensor_test.py --port COMx`。
+- 真机确认 ACK、正式 FLEX/IMU/ACC 遥测、报警业务消费虚拟 ACC，以及 EXIT/超时恢复真实 ADC/JY61P。

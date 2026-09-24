@@ -2,6 +2,27 @@
 
 USART3 使用 9600、8N1。每一帧以 `\r\n` 结束。
 
+## Level 2 开发测试命令
+
+这些命令只用于开发测试，统一使用 `TEST:` 前缀。固件上电始终为 `REAL`；测试时必须断开 JDY-23，由 USB-TTL 独占 USART3。测试数据是已经标准化的输入，不再经过手机端 FLEX Zero/Full 校准。
+
+```text
+TEST:ENTER
+TEST:FLEX|L1=0|L2=10|L3=20|L4=30|L5=40|R1=50|R2=60|R3=70|R4=80|R5=100
+TEST:IMU|R=10.00|P=-5.00|Y=2.00
+TEST:ACC|X=0.00|Y=0.00|Z=1.00|VALID=1
+TEST:APPLY
+TEST:EXIT
+```
+
+- FLEX 必须一次提供完整十指，且每项为 `0~100`。
+- Roll/Pitch/Yaw 必须是有限数，范围 `-180~180` 度。
+- ACC 必须是有限数，范围 `-16~16 g`；`VALID` 只能为 `0/1`。
+- `APPLY` 只有在本轮 FLEX、IMU、ACC 均合法时才原子提交；非法命令不会覆盖上一份已应用数据。
+- VIRTUAL 模式连续 5 秒没有合法测试活动会自动返回 REAL。
+- 固件对每条测试命令返回一条限流确认，例如 `[TEST] MODE=VIRTUAL`、`[TEST] APPLY=OK` 或 `[TEST] ERROR=FLEX_INVALID`。
+- APPLY 后的结果仍由正式 `FLEX`、`IMU`、`ACC`、报警和手势业务链路产生，不存在测试专用识别或报警逻辑。
+
 ## 启动帧
 
 ```text
