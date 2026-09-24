@@ -417,3 +417,23 @@
 
 - 手动烧录最新 HEX 后，用 USB-TTL 运行 `python tools/glove_test/run_virtual_sensor_test.py --port COMx`。
 - 真机确认 ACK、正式 FLEX/IMU/ACC 遥测、报警业务消费虚拟 ACC，以及 EXIT/超时恢复真实 ADC/JY61P。
+
+## 2026-09-24 - Level 2 真机 Virtual IMU 损坏修复
+
+### 根因与修复
+
+- STM32 工程启用了 ARMCC5 MicroLIB；目标机上的 `sscanf(..., "%f", ...)` 虽返回成功，但没有可靠写入三个 `float`，损坏位模式随后经正式 IMU telemetry 输出为巨大异常数。主机 libc 支持 `%f`，所以原 host test 未能复现。
+- TEST IMU/ACC 改用不依赖 libc 浮点扫描的严格十进制解析器；仍拒绝 NaN、Inf、指数格式、超范围值和尾随内容。
+- 将 applied snapshot 写入 `JY61P_Data_t` 的步骤提取成可直接测试的 `TestInput_PublishMotion()`；正式主循环仍写 `JY61P_Right`，正式 IMU telemetry 仍读取 `JY61P_Right.angle[]`。
+- ENTER 后 APPLY 前没有 applied snapshot，发布函数保持无操作；第二次 APPLY、EXIT 和 timeout 均增加回归覆盖。
+- 审查时撤销了与本问题无关的 ACC 全局比例变更，保持 REAL MODE 原有 `JY61P_ACC_SCALE` 不变。
+
+### 验证
+
+- 固件 host tests：`alarm_engine_test`、`bluetooth_tx_test`、`jy61p_zero_filter_test`、`test_input_test` 全部通过。
+- `alarm_wiring_test`、`test_input_wiring_test` 全部通过；Python Runner unittest 4/4 通过。
+- Keil UV4 / ARM Compiler 5.06u6 实际 Build：`0 Error(s), 0 Warning(s)`，已重新生成 HEX；未烧录开发板。
+
+### 真机待测
+
+- 烧录最新 HEX 后，运行 `python tools/glove_test/run_virtual_sensor_test.py --port COM15`；正式 IMU telemetry 应输出约 `R=10.00|P=-5.00|Y=2.00`。

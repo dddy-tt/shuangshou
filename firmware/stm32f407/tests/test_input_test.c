@@ -129,8 +129,8 @@ int main(void)
           motion.angle[2] == 2.0f,
           "first APPLY must publish all angle axes to formal JY structure");
     CHECK(motion.acc[0] == 0.0f && motion.acc[1] == 0.0f &&
-          motion.acc[2] == 1.0f && motion.acc_raw[2] == 2048,
-          "first APPLY must publish ACC in g and matching raw scale");
+          motion.acc[2] == 1.0f && motion.acc_raw[2] == 208,
+          "first APPLY must preserve the existing JY61P raw scale");
     CHECK(motion.online != 0U && motion.angle_valid != 0U &&
           motion.acc_valid != 0U && motion.acc_updated_ms == 24U &&
           motion.angle_updated_ms == 24U,
@@ -170,8 +170,8 @@ int main(void)
     CHECK(motion.angle[0] == -12.5f && motion.angle[1] == 3.25f &&
           motion.angle[2] == 45.5f && motion.acc[0] == -0.5f &&
           motion.acc[1] == 0.25f && motion.acc[2] == 0.75f &&
-          motion.acc_raw[0] == -1024 && motion.acc_raw[1] == 512 &&
-          motion.acc_raw[2] == 1536 && motion.acc_valid == 0U &&
+          motion.acc_raw[0] == -104 && motion.acc_raw[1] == 52 &&
+          motion.acc_raw[2] == 156 && motion.acc_valid == 0U &&
           motion.acc_updated_ms == 29U && motion.angle_updated_ms == 29U,
           "second APPLY must update the formal JY structure");
 

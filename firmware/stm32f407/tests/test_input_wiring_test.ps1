@@ -34,8 +34,8 @@ if ($source -notmatch 'test_input_parse_decimal') {
 if ($source -match 'sscanf[\s\S]*%f') {
     throw 'TEST input must not depend on scanf floating-point conversion.'
 }
-if ($jy61p -notmatch 'JY61P_ACC_SCALE\s+0\.00048828125f') {
-    throw 'Virtual ACC raw scale must match JY61P raw / 32768 * 16 g semantics.'
+if ($jy61p -notmatch 'JY61P_ACC_SCALE\s+0\.00478515625f') {
+    throw 'Level 2 must preserve the existing REAL-mode JY61P ACC scale.'
 }
 if ($project -notmatch '<FileName>test_input\.c</FileName>') {
     throw 'Keil project does not compile test_input.c.'
