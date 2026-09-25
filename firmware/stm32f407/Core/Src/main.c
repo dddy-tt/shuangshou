@@ -79,6 +79,7 @@
 #define TEST_ACK_MAX_LENGTH                 80U
 #define TEST_ACK_RETRY_PERIOD_MS             20U
 #define TESTDBG_PERIOD_MS                  3000U
+#define JY_REAL_STACK_DIAG_PERIOD_MS       3000U
 #define STACK_MONITOR_PATTERN          0xA5A5A5A5UL
 #define STACK_MONITOR_GUARD            0xD15EA5EDUL
 
@@ -163,6 +164,17 @@ static uint8_t  alarm_clear_pending = 0U;
 static uint32_t alarm_buzzer_started_ms = 0U;
 static uint8_t  alarm_buzzer_active = 0U;
 static uint32_t t_jy_right_recover = 0U;
+static uint32_t t_jy_real_stack_diag = 0U;
+static uint32_t jy_right_read_count = 0U;
+static uint32_t jy_right_acc_error_count = 0U;
+static uint32_t jy_right_gyro_error_count = 0U;
+static uint32_t jy_right_angle_error_count = 0U;
+static uint32_t jy_right_angle_zero_count = 0U;
+static uint32_t jy_right_recovery_attempt_count = 0U;
+static uint32_t jy_right_recovery_success_count = 0U;
+static uint32_t jy_right_recovery_failure_count = 0U;
+static uint32_t jy_right_gyro_updated_ms = 0U;
+static uint8_t jy_right_gyro_sample_seen = 0U;
 static uint32_t t_testdbg = 0U;
 static uint8_t testdbg_float_sent = 0U;
 static uint8_t stack_monitor_ready = 0U;
@@ -219,19 +231,36 @@ static uint8_t Alarm_MainTimestampFresh(uint32_t now_ms, uint32_t stamp_ms)
     return (age <= 0x7FFFFFFFUL && age <= ALARM_MAX_SENSOR_AGE_MS) ? 1U : 0U;
 }
 
-static uint32_t JY_MainAccAge(uint32_t now_ms, const JY61P_Data_t *data)
+static uint32_t JY_MainSampleAge(uint32_t now_ms, uint8_t sample_seen,
+                                 uint32_t updated_ms)
 {
     uint32_t age;
 
-    if (data == 0 || data->acc_sample_seen == 0U) {
+    if (sample_seen == 0U) {
         return 0xFFFFFFFFUL;
     }
 
-    age = now_ms - data->acc_updated_ms;
+    age = now_ms - updated_ms;
     if (age > 0x7FFFFFFFUL) {
         return 0xFFFFFFFFUL;
     }
     return age;
+}
+
+static uint32_t JY_MainAccAge(uint32_t now_ms, const JY61P_Data_t *data)
+{
+    if (data == 0) {
+        return 0xFFFFFFFFUL;
+    }
+    return JY_MainSampleAge(now_ms, data->acc_sample_seen,
+                            data->acc_updated_ms);
+}
+
+static void JY_MainCountSaturating(uint32_t *counter)
+{
+    if (counter != 0 && *counter != 0xFFFFFFFFUL) {
+        (*counter)++;
+    }
 }
 
 static uint8_t Alarm_MainSendEvent(const Alarm_Event_t *event, uint8_t active)
@@ -633,10 +662,34 @@ int main(void)
          */
 #if JY61P_RIGHT_ENABLE
         if (JY61P_IsOnline(JY61P_CH_RIGHT)) {
-            JY61P_Read_Data(JY61P_CH_RIGHT, acc, gyro, angle);
+            uint8_t jy_error_mask =
+                JY61P_Read_Data(JY61P_CH_RIGHT, acc, gyro, angle);
+            JY_MainCountSaturating(&jy_right_read_count);
+            if ((jy_error_mask & JY61P_ERR_ACC) != 0U) {
+                JY_MainCountSaturating(&jy_right_acc_error_count);
+            }
+            if ((jy_error_mask & JY61P_ERR_GYRO) != 0U) {
+                JY_MainCountSaturating(&jy_right_gyro_error_count);
+            } else {
+                jy_right_gyro_sample_seen = 1U;
+                jy_right_gyro_updated_ms = sys_tick_ms;
+            }
+            if ((jy_error_mask & JY61P_ERR_ANGLE) != 0U) {
+                JY_MainCountSaturating(&jy_right_angle_error_count);
+            }
+            if ((jy_error_mask & JY61P_ERR_ANGLE_ZERO) != 0U) {
+                JY_MainCountSaturating(&jy_right_angle_zero_count);
+            }
         } else if ((now - t_jy_right_recover) >= JY_RECOVERY_PERIOD_MS) {
             t_jy_right_recover = now;
-            (void)JY61P_TryRecover(JY61P_CH_RIGHT);
+            JY_MainCountSaturating(&jy_right_recovery_attempt_count);
+            if (JY61P_TryRecover(JY61P_CH_RIGHT) == 0U) {
+                JY_MainCountSaturating(&jy_right_recovery_success_count);
+                jy_right_gyro_sample_seen = 0U;
+                jy_right_gyro_updated_ms = 0U;
+            } else {
+                JY_MainCountSaturating(&jy_right_recovery_failure_count);
+            }
         }
 #endif
 #if JY61P_LEFT_ENABLE
@@ -996,6 +1049,9 @@ int main(void)
 #endif
             static char jy_line[96];
             static char acc_line[96];
+            static char jy_debug_line[384];
+            static char jy_real_stack_line[96];
+            static uint32_t jy_hal_errors[4];
             static char ppg_line[96];
             static char alarm_state_line[96];
 #if MAX30102_DIAG_ONLY
@@ -1144,6 +1200,82 @@ int main(void)
                          (double)JY61P_Right.acc[2],
                          acc_valid_value);
                 BT_SendString(acc_line);
+
+                /* REAL-only raw sensor health diagnostics; formal IMU/ACC
+                 * frames above remain unchanged.  Keep this at the existing
+                 * 1 Hz diagnostic cadence to protect the 9600-baud TX queue. */
+                if (TestInput_GetSource() == TEST_INPUT_SOURCE_REAL) {
+                    int jy_debug_length;
+                    JY61P_GetLastHalErrors(JY61P_CH_RIGHT, jy_hal_errors);
+                    jy_debug_length = snprintf(
+                        jy_debug_line, sizeof(jy_debug_line),
+                        "[JYDBG] ONLINE=%u|ERR=%u|LAST=%u|"
+                        "ACC_RAW=%d,%d,%d|GYRO_RAW=%d,%d,%d|"
+                        "ANGLE_RAW=%d,%d,%d|AV=%u|ANGV=%u|ASEEN=%u|"
+                        "GSEEN=%u|TSEEN=%u|AAGE=%lu|GAGE=%lu|TAGE=%lu|"
+                        "READS=%lu|I2CERR=%lu,%lu,%lu|"
+                        "HALERR=%lu,%lu,%lu,%lu|ZERO=%lu|REC=%lu,%lu,%lu\r\n",
+                        (unsigned int)JY61P_Right.online,
+                        (unsigned int)JY61P_Right.error_streak,
+                        (unsigned int)JY61P_Right.last_error,
+                        (int)JY61P_Right.acc_raw[0],
+                        (int)JY61P_Right.acc_raw[1],
+                        (int)JY61P_Right.acc_raw[2],
+                        (int)JY61P_Right.gyro_raw[0],
+                        (int)JY61P_Right.gyro_raw[1],
+                        (int)JY61P_Right.gyro_raw[2],
+                        (int)JY61P_Right.angle_raw[0],
+                        (int)JY61P_Right.angle_raw[1],
+                        (int)JY61P_Right.angle_raw[2],
+                        (unsigned int)JY61P_Right.acc_valid,
+                        (unsigned int)JY61P_Right.angle_valid,
+                        (unsigned int)JY61P_Right.acc_sample_seen,
+                        (unsigned int)jy_right_gyro_sample_seen,
+                        (unsigned int)JY61P_Right.angle_sample_seen,
+                        (unsigned long)JY_MainAccAge(now, &JY61P_Right),
+                        (unsigned long)JY_MainSampleAge(
+                            now, jy_right_gyro_sample_seen,
+                            jy_right_gyro_updated_ms),
+                        (unsigned long)JY_MainSampleAge(
+                            now, JY61P_Right.angle_sample_seen,
+                            JY61P_Right.angle_updated_ms),
+                        (unsigned long)jy_right_read_count,
+                        (unsigned long)jy_right_acc_error_count,
+                        (unsigned long)jy_right_gyro_error_count,
+                        (unsigned long)jy_right_angle_error_count,
+                        (unsigned long)jy_hal_errors[0],
+                        (unsigned long)jy_hal_errors[1],
+                        (unsigned long)jy_hal_errors[2],
+                        (unsigned long)jy_hal_errors[3],
+                        (unsigned long)jy_right_angle_zero_count,
+                        (unsigned long)jy_right_recovery_attempt_count,
+                        (unsigned long)jy_right_recovery_success_count,
+                        (unsigned long)jy_right_recovery_failure_count);
+                    if (jy_debug_length > 0 &&
+                        (size_t)jy_debug_length < sizeof(jy_debug_line)) {
+                        (void)BT_SendString(jy_debug_line);
+                    }
+
+                    if (stack_monitor_ready != 0U &&
+                        (uint32_t)(now - t_jy_real_stack_diag) >=
+                            JY_REAL_STACK_DIAG_PERIOD_MS) {
+                        uint32_t stack_size;
+                        uint32_t stack_used;
+                        t_jy_real_stack_diag = now;
+                        stack_size = (uint32_t)&__initial_sp -
+                                     (uint32_t)&Stack_Mem;
+                        stack_used = StackMonitor_Used();
+                        (void)snprintf(
+                            jy_real_stack_line, sizeof(jy_real_stack_line),
+                            "[STACK]|SIZE=%lu|USED=%lu|FREE=%lu|GUARD=%u\r\n",
+                            (unsigned long)stack_size,
+                            (unsigned long)stack_used,
+                            (unsigned long)(stack_size - stack_used),
+                            (unsigned int)(*(volatile const uint32_t *)&Stack_Mem ==
+                                           STACK_MONITOR_GUARD));
+                        (void)BT_SendString(jy_real_stack_line);
+                    }
+                }
 
                 if (Alarm_FormatState(alarm_state_line,
                                       sizeof(alarm_state_line),

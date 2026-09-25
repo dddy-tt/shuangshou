@@ -77,5 +77,7 @@ uint8_t JY61P_Read_Angle(uint8_t channel, float *roll, float *pitch, float *yaw)
 uint8_t JY61P_TryRecover(uint8_t channel);
 uint8_t JY61P_IsOnline(uint8_t channel);
 void    JY61P_GetLastAngle(uint8_t channel, float *roll, float *pitch, float *yaw);
+/* REAL bring-up diagnostics: latest HAL error for ACC/GYRO/ANGLE/PROBE. */
+void    JY61P_GetLastHalErrors(uint8_t channel, uint32_t errors[4]);
 
 #endif /* __JY61P_H */

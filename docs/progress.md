@@ -1,5 +1,25 @@
 # Mini Program Progress
 
+## 2026-09-25 - Level 4A 真实 JY61P 采集与自动回归
+
+### 已完成
+
+- 新增 `tools/glove_test/test_real_imu.py`：REAL 模式确认、15 秒静态真机采集、原始日志/统计/健康判定；REAL 采集独立于 `tools/test_all.py`，不发送虚拟传感器命令。
+- 为诊断真实 I2C 读取增加 JYDBG 原始值、分向量 HAL 错误、读取错误/恢复计数和栈水位帧；正式 IMU/ACC/JY 遥测和量程换算保持原有路径。
+- A/B 观察到 100 kHz I2C1 有间歇性错误后，将右手 JY61P 使用的 I2C1 调至 50 kHz；PB6/PB7、传感器量程/比例和采样周期不变，I2C2/I2C3 保持 100 kHz。
+
+### 验收结果
+
+- Level 4A REAL 真机采集：PASS。JY 初始化成功；ONLINE、ACC/ANGLE 有效率均 100%；最大 AGE 2 ms；读取速率约 99.6 Hz；窗口内各向量 I2C/HAL 错误和恢复增量为 0；原始 ACC 与正式 ACC 一致，重力模长中位数 0.9956 g；栈守卫通过。
+- 完整项目回归 `python tools/test_all.py --port COM15`：PROJECT REGRESSION PASS。Mini Program 30/30、重点回归 17/17、固件 host 5/5、Python 单测 47/47（含 Level 4A 新增的 13 项）、wiring/static 3/3、Keil 0 error/0 warning、ST-Link Flash/Verify/Reset/Run、Level 3 硬件 case 4/4、Stack Guard 均通过。
+- 真实采集报告：`artifacts/real_imu/20260925_234914_648665/`；完整回归报告：`artifacts/hardware_test/20260925_234816_417494_32504/`。
+
+### 边界与待选验证
+
+- 100 kHz 曾出现 I2C 错误，50 kHz 采集窗口未复现；这是当前样机的 A/B 结果，支持总线通信裕量假设，不等同于确认唯一物理根因。
+- 本轮未运行真人慢速倾斜 `--motion-check`；静态姿态数据和原始/换算一致性已通过，动态轴响应可在需要时单独测试。
+- Level 4A 不取代医疗/跌倒报警认证；未做实际跌倒、抽搐、蜂鸣器、BLE、MQTT 或继电器测试。
+
 ## 2026-09-25 - 项目全回归总入口
 
 ### 已完成

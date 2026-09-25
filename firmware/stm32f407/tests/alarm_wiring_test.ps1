@@ -25,8 +25,10 @@ if ($main -notmatch '__HAL_TIM_SET_COMPARE\(&htim4, TIM_CHANNEL_3, BUZZER_PWM_SI
 
 $jyPath = Join-Path $PSScriptRoot '..\Core\Src\jy61p.c'
 $jyHeaderPath = Join-Path $PSScriptRoot '..\Core\Inc\jy61p.h'
+$i2cPath = Join-Path $PSScriptRoot '..\Core\Src\i2c.c'
 $jy = Get-Content -LiteralPath $jyPath -Raw
 $jyHeader = Get-Content -LiteralPath $jyHeaderPath -Raw
+$i2c = Get-Content -LiteralPath $i2cPath -Raw
 if ($jyHeader -notmatch '\blast_error\b' -or
     $jyHeader -notmatch '\bacc_sample_seen\b') {
     throw 'JY61P runtime diagnostic state is incomplete.'
@@ -46,6 +48,12 @@ if ($jy -notmatch 'jy61p_record_result' -or
 }
 if ($jy -match 'HAL_I2C_Master_Transmit') {
     throw 'Recovery must not send an undocumented I2C reset command.'
+}
+if ($i2c -notmatch 'hi2c->Init\.ClockSpeed\s*=\s*clock_speed_hz\s*;' -or
+    $i2c -notmatch 'MX_I2C_Init\(&hi2c1\s*,\s*I2C1\s*,\s*50000U\s*\)' -or
+    $i2c -notmatch 'MX_I2C_Init\(&hi2c2\s*,\s*I2C2\s*,\s*100000U\s*\)' -or
+    $i2c -notmatch 'MX_I2C_Init\(&hi2c3\s*,\s*I2C3\s*,\s*100000U\s*\)') {
+    throw 'The I2C1 diagnostic clock must be 50 kHz while I2C2 and I2C3 remain at 100 kHz.'
 }
 
 Write-Output 'alarm_wiring_test: all checks passed'

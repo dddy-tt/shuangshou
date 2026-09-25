@@ -11,6 +11,16 @@
 JY61P_Data_t JY61P_Right;
 JY61P_Data_t JY61P_Left;
 
+enum {
+    JY61P_DIAG_ACC = 0U,
+    JY61P_DIAG_GYRO,
+    JY61P_DIAG_ANGLE,
+    JY61P_DIAG_PROBE,
+    JY61P_DIAG_COUNT
+};
+
+static uint32_t jy61p_last_hal_error[2][JY61P_DIAG_COUNT];
+
 /* 与主调度器共用 TIM3 的毫秒时间基准，便于判断样本是否过期。 */
 extern volatile uint32_t sys_tick_ms;
 
@@ -25,6 +35,11 @@ static I2C_HandleTypeDef *channel_to_hi2c(uint8_t channel)
 static JY61P_Data_t *data_of(uint8_t channel)
 {
     return (channel == JY61P_CH_RIGHT) ? &JY61P_Right : &JY61P_Left;
+}
+
+static uint8_t jy61p_channel_index(uint8_t channel)
+{
+    return (channel == JY61P_CH_RIGHT) ? 0U : 1U;
 }
 
 static void jy61p_record_result(JY61P_Data_t *data, uint8_t error_mask)
@@ -66,7 +81,9 @@ static float jy61p_scale_angle(int16_t raw)
     return ((float)raw / 32768.0f) * 180.0f;
 }
 
-static uint8_t jy61p_read_vector(I2C_HandleTypeDef *hi2c, uint8_t reg_start, int16_t out_raw[3])
+static uint8_t jy61p_read_vector(uint8_t channel, I2C_HandleTypeDef *hi2c,
+                                 uint8_t reg_start, uint8_t diag_index,
+                                 int16_t out_raw[3])
 {
     uint8_t buf[JY61P_VECTOR_LEN];
     HAL_StatusTypeDef st;
@@ -74,6 +91,8 @@ static uint8_t jy61p_read_vector(I2C_HandleTypeDef *hi2c, uint8_t reg_start, int
     st = HAL_I2C_Mem_Read(hi2c, JY61P_ADDR_HAL, reg_start,
                           I2C_MEMADD_SIZE_8BIT, buf, JY61P_VECTOR_LEN,
                           JY61P_I2C_TIMEOUT_MS);
+    jy61p_last_hal_error[jy61p_channel_index(channel)][diag_index] =
+        (st == HAL_OK) ? HAL_I2C_ERROR_NONE : HAL_I2C_GetError(hi2c);
     if (st != HAL_OK) {
         return 1U;
     }
@@ -158,6 +177,8 @@ uint8_t JY61P_Init(uint8_t channel)
     int16_t angle_raw[3];
 
     memset(data, 0, sizeof(JY61P_Data_t));
+    memset(jy61p_last_hal_error[jy61p_channel_index(channel)], 0,
+           sizeof(jy61p_last_hal_error[0]));
 
     /* Probe with retry: JY61P may not be ready right after power-on. */
     {
@@ -168,6 +189,8 @@ uint8_t JY61P_Init(uint8_t channel)
             pst = HAL_I2C_Mem_Read(hi2c, JY61P_ADDR_HAL, JY61P_REG_ROLL_L,
                                    I2C_MEMADD_SIZE_8BIT, probe_buf, 2,
                                    JY61P_I2C_TIMEOUT_MS);
+            jy61p_last_hal_error[jy61p_channel_index(channel)][JY61P_DIAG_PROBE] =
+                (pst == HAL_OK) ? HAL_I2C_ERROR_NONE : HAL_I2C_GetError(hi2c);
             if (pst == HAL_OK) break;
             HAL_Delay(100);
         } while (++try < 5);
@@ -180,7 +203,8 @@ uint8_t JY61P_Init(uint8_t channel)
     }
 
     /* 全零姿态帧不作为当前有效样本；保存最后一个非零有效姿态。 */
-    if (jy61p_read_vector(hi2c, JY61P_REG_ANGLE_START, angle_raw) == 0U) {
+    if (jy61p_read_vector(channel, hi2c, JY61P_REG_ANGLE_START,
+                          JY61P_DIAG_ANGLE, angle_raw) == 0U) {
         if (jy61p_accept_angle_raw(data, angle_raw, 0) != 0U) {
             data->angle_valid = 1U;
             data->angle_updated_ms = sys_tick_ms;
@@ -207,7 +231,8 @@ uint8_t JY61P_Read_Data(uint8_t channel, float *acc, float *gyro, float *angle)
     uint32_t read_tick;
     int16_t angle_raw[3];
 
-    if (jy61p_read_vector(hi2c, JY61P_REG_ACC_START, data->acc_raw) != 0U) {
+    if (jy61p_read_vector(channel, hi2c, JY61P_REG_ACC_START,
+                          JY61P_DIAG_ACC, data->acc_raw) != 0U) {
         err |= JY61P_ERR_ACC;
         data->acc_valid = 0U;
     } else {
@@ -217,13 +242,15 @@ uint8_t JY61P_Read_Data(uint8_t channel, float *acc, float *gyro, float *angle)
         data->acc_updated_ms = sys_tick_ms;
     }
 
-    if (jy61p_read_vector(hi2c, JY61P_REG_GYRO_START, data->gyro_raw) != 0U) {
+    if (jy61p_read_vector(channel, hi2c, JY61P_REG_GYRO_START,
+                          JY61P_DIAG_GYRO, data->gyro_raw) != 0U) {
         err |= JY61P_ERR_GYRO;
     } else {
         jy61p_publish_gyro(data, gyro);
     }
 
-    if (jy61p_read_vector(hi2c, JY61P_REG_ANGLE_START, angle_raw) != 0U) {
+    if (jy61p_read_vector(channel, hi2c, JY61P_REG_ANGLE_START,
+                          JY61P_DIAG_ANGLE, angle_raw) != 0U) {
         err |= JY61P_ERR_ANGLE;
         data->angle_valid = 0U;
         data->angle_zero_streak = 0U;
@@ -252,7 +279,8 @@ uint8_t JY61P_Read_Angle(uint8_t channel, float *roll, float *pitch, float *yaw)
     uint32_t read_tick;
     int16_t angle_raw[3];
 
-    if (jy61p_read_vector(hi2c, JY61P_REG_ANGLE_START, angle_raw) != 0U) {
+    if (jy61p_read_vector(channel, hi2c, JY61P_REG_ANGLE_START,
+                          JY61P_DIAG_ANGLE, angle_raw) != 0U) {
         data->angle_valid = 0U;
         data->angle_zero_streak = 0U;
         jy61p_record_result(data, JY61P_ERR_ANGLE);
@@ -286,8 +314,12 @@ uint8_t JY61P_TryRecover(uint8_t channel)
     /* A short probe is deliberate: a disconnected module must not block the
      * 5-ms scheduler for the 100-ms timeout used by normal transfers.  No
      * sensor reset register or undocumented bus-pulse command is sent. */
-    if (HAL_I2C_Mem_Read(hi2c, JY61P_ADDR_HAL, JY61P_REG_ROLL_L,
-                         I2C_MEMADD_SIZE_8BIT, probe, sizeof(probe), 5U) != HAL_OK) {
+    HAL_StatusTypeDef status = HAL_I2C_Mem_Read(
+        hi2c, JY61P_ADDR_HAL, JY61P_REG_ROLL_L,
+        I2C_MEMADD_SIZE_8BIT, probe, sizeof(probe), 5U);
+    jy61p_last_hal_error[jy61p_channel_index(channel)][JY61P_DIAG_PROBE] =
+        (status == HAL_OK) ? HAL_I2C_ERROR_NONE : HAL_I2C_GetError(hi2c);
+    if (status != HAL_OK) {
         /* A transient bus error can leave the HAL I2C state machine unusable
          * even after the sensor is electrically fine again.  Rebuild only
          * this controller, then probe once more with the short timeout. */
@@ -297,8 +329,11 @@ uint8_t JY61P_TryRecover(uint8_t channel)
         } else {
             MX_I2C2_Init();
         }
-        if (HAL_I2C_Mem_Read(hi2c, JY61P_ADDR_HAL, JY61P_REG_ROLL_L,
-                             I2C_MEMADD_SIZE_8BIT, probe, sizeof(probe), 5U) != HAL_OK) {
+        status = HAL_I2C_Mem_Read(hi2c, JY61P_ADDR_HAL, JY61P_REG_ROLL_L,
+                                  I2C_MEMADD_SIZE_8BIT, probe, sizeof(probe), 5U);
+        jy61p_last_hal_error[jy61p_channel_index(channel)][JY61P_DIAG_PROBE] =
+            (status == HAL_OK) ? HAL_I2C_ERROR_NONE : HAL_I2C_GetError(hi2c);
+        if (status != HAL_OK) {
             jy61p_record_result(data, JY61P_ERR_PROBE);
             return 1U;
         }
@@ -327,4 +362,13 @@ void JY61P_GetLastAngle(uint8_t channel, float *roll, float *pitch, float *yaw)
     if (roll != 0)  *roll = data->angle[0];
     if (pitch != 0) *pitch = data->angle[1];
     if (yaw != 0)   *yaw = data->angle[2];
+}
+
+void JY61P_GetLastHalErrors(uint8_t channel, uint32_t errors[4])
+{
+    uint8_t i;
+    if (errors == 0) return;
+    for (i = 0U; i < JY61P_DIAG_COUNT; i++) {
+        errors[i] = jy61p_last_hal_error[jy61p_channel_index(channel)][i];
+    }
 }

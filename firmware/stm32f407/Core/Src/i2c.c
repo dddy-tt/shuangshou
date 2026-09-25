@@ -70,10 +70,11 @@ static void i2c_periph_reset(I2C_TypeDef *instance)
     }
 }
 
-static void MX_I2C_Init(I2C_HandleTypeDef *hi2c, I2C_TypeDef *instance)
+static void MX_I2C_Init(I2C_HandleTypeDef *hi2c, I2C_TypeDef *instance,
+                        uint32_t clock_speed_hz)
 {
     hi2c->Instance = instance;
-    hi2c->Init.ClockSpeed = 100000;
+    hi2c->Init.ClockSpeed = clock_speed_hz;
     hi2c->Init.DutyCycle = I2C_DUTYCYCLE_2;
     hi2c->Init.OwnAddress1 = 0;
     hi2c->Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -90,19 +91,19 @@ void MX_I2C1_Init(void)
 {
     i2c_periph_reset(I2C1);
     i2c_bus_recover(GPIOB, GPIO_PIN_6, GPIOB, GPIO_PIN_7);
-    MX_I2C_Init(&hi2c1, I2C1);
+    MX_I2C_Init(&hi2c1, I2C1, 50000U);
 }
 
 void MX_I2C2_Init(void)
 {
     i2c_periph_reset(I2C2);
     i2c_bus_recover(GPIOB, GPIO_PIN_10, GPIOB, GPIO_PIN_11);
-    MX_I2C_Init(&hi2c2, I2C2);
+    MX_I2C_Init(&hi2c2, I2C2, 100000U);
 }
 
 void MX_I2C3_Init(void)
 {
     /* MAX30102: clean init — no recovery needed on fresh pins */
     __HAL_RCC_I2C3_CLK_ENABLE();
-    MX_I2C_Init(&hi2c3, I2C3);
+    MX_I2C_Init(&hi2c3, I2C3, 100000U);
 }

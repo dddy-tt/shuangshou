@@ -28,6 +28,7 @@ typedef int HAL_StatusTypeDef;
 
 #define HAL_OK                    0
 #define HAL_ERROR                 1
+#define HAL_I2C_ERROR_NONE        0U
 #define I2C_MEMADD_SIZE_8BIT      1U
 
 I2C_HandleTypeDef hi2c1;
@@ -36,6 +37,8 @@ I2C_HandleTypeDef hi2c3;
 volatile uint32_t sys_tick_ms;
 
 static int16_t mock_angle_raw[3];
+static uint8_t mock_fail_reg;
+static uint32_t mock_hal_error_code;
 
 HAL_StatusTypeDef HAL_I2C_Mem_Read(I2C_HandleTypeDef *hi2c,
                                    uint16_t dev_addr,
@@ -45,6 +48,7 @@ HAL_StatusTypeDef HAL_I2C_Mem_Read(I2C_HandleTypeDef *hi2c,
                                    uint16_t size,
                                    uint32_t timeout);
 HAL_StatusTypeDef HAL_I2C_DeInit(I2C_HandleTypeDef *hi2c);
+uint32_t HAL_I2C_GetError(I2C_HandleTypeDef *hi2c);
 void HAL_Delay(uint32_t delay_ms);
 void MX_I2C1_Init(void);
 void MX_I2C2_Init(void);
@@ -90,6 +94,7 @@ HAL_StatusTypeDef HAL_I2C_Mem_Read(I2C_HandleTypeDef *hi2c,
     (void)mem_addr_size;
     (void)timeout;
     if (data == 0 || size != 6U) return HAL_ERROR;
+    if (mem_addr == mock_fail_reg) return HAL_ERROR;
 
     if (mem_addr == JY61P_REG_AX_L) {
         put_vector(data, acc_raw);
@@ -101,6 +106,12 @@ HAL_StatusTypeDef HAL_I2C_Mem_Read(I2C_HandleTypeDef *hi2c,
         return HAL_ERROR;
     }
     return HAL_OK;
+}
+
+uint32_t HAL_I2C_GetError(I2C_HandleTypeDef *hi2c)
+{
+    (void)hi2c;
+    return mock_hal_error_code;
 }
 
 HAL_StatusTypeDef HAL_I2C_DeInit(I2C_HandleTypeDef *hi2c)
@@ -130,6 +141,7 @@ static uint8_t read_once(void)
 int main(void)
 {
     float saved_angle[3];
+    uint32_t hal_errors[4];
     uint8_t err;
 
     memset(&JY61P_Right, 0, sizeof(JY61P_Right));
@@ -175,6 +187,18 @@ int main(void)
           JY61P_Right.angle[1] != 0.0f &&
           JY61P_Right.angle[2] != 0.0f,
           "normal pose must replace the preserved last good pose");
+
+    mock_fail_reg = JY61P_REG_GX_L;
+    mock_hal_error_code = 0x04U;
+    err = read_once();
+    JY61P_GetLastHalErrors(JY61P_CH_RIGHT, hal_errors);
+    CHECK((err & JY61P_ERR_GYRO) != 0U,
+          "a mocked gyro NACK must remain visible in the driver result");
+    CHECK(hal_errors[0] == 0U && hal_errors[1] == 0x04U &&
+          hal_errors[2] == 0U,
+          "HAL error diagnostics must preserve the failing vector's exact code");
+    mock_fail_reg = 0U;
+    mock_hal_error_code = 0U;
 
     if (failures != 0) return 1;
     printf("jy61p_zero_filter_test: all checks passed\n");

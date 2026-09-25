@@ -89,6 +89,31 @@ JY|ONLINE=<0/1>|ERR=<连续错误计数>|LAST=<最近读取错误位掩码>|AGE=
 
 该帧用于区分“设备在线但本次 ACC 无效”和“设备已动态离线”，不能把缓存的 ACC 数值当作新样本。
 
+### REAL JY61P bring-up 诊断帧（非业务遥测）
+
+仅在 `TestInput` 为 REAL 时，固件每秒附加一条低频诊断帧；不会改变正式 `IMU`、`ACC`、`JY` 或报警帧：
+
+```text
+[JYDBG] ONLINE=1|ERR=0|LAST=0|ACC_RAW=0,0,2048|GYRO_RAW=0,0,0|ANGLE_RAW=100,0,100|AV=1|ANGV=1|ASEEN=1|GSEEN=1|TSEEN=1|AAGE=10|GAGE=10|TAGE=10|READS=100|I2CERR=0,0,0|HALERR=0,0,0,0|ZERO=0|REC=0,0,0
+```
+
+- `ACC_RAW/GYRO_RAW/ANGLE_RAW` 是驱动解析后的有符号 16 位原始轴值，轴顺序均为 X/Y/Z（角度为 Roll/Pitch/Yaw）。
+- `AV/ANGV` 是当前 ACC/ANGLE 样本有效位；`ASEEN/GSEEN/TSEEN` 表示本次启动以来是否见过对应有效样本。
+- `AAGE/GAGE/TAGE` 是各自最近有效样本年龄，单位 ms；尚未见过样本时为 `4294967295`。
+- `READS` 是在线期间调用完整右手读取事务的累计次数；`I2CERR` 分别累计 ACC、GYRO、ANGLE 读取错误次数，`ZERO` 累计三轴角度全零快照次数。
+- `HALERR` 依次为 ACC/GYRO/ANGLE/PROBE 最近一次 HAL I2C error code。常见位：`1=BERR`、`2=ARLO`、`4=AF/NACK`、`8=OVR`、`16=DMA`、`32=TIMEOUT`、`64=SIZE`、`128=DMA_PARAM`、`256=INVALID_CALLBACK`；组合值按位解释。
+- `REC` 依次为离线恢复尝试、成功、失败累计数。累计诊断计数饱和于 `uint32` 上限；它们用于 bring-up，不属于正式业务协议。
+- `ERR` 是 `uint8` 连续失败计数；驱动在达到 3 时将 ONLINE 拉低，之后失败的恢复探测仍会继续递增并最终饱和。因此离线时 `ERR>3` 本身不是内存损坏证据；需要结合 ONLINE、LAST、HALERR 和恢复计数判断。ONLINE=1 且 ERR>3 才与驱动状态机矛盾。
+- `LAST` 仍使用本节前述 `JY61P_ERR_*` 位掩码。`ANGLE_ZERO` 属于已应答的瞬时无效姿态，不计入 I2C 读取错误，也不等同离线。
+
+REAL 模式下另每 3 秒输出一条共享栈水位帧：
+
+```text
+[STACK]|SIZE=4096|USED=1024|FREE=3072|GUARD=1
+```
+
+`GUARD=1` 且 `FREE>0` 表示当前守卫仍完整且观测到未使用栈空间。此诊断只反映运行时水位，不替代编译器静态调用图分析。
+
 ## 报警与 ACC 帧
 
 JY61P ACC 单位为 `g`。读取失败或样本超过固件新鲜度窗口时，仍可输出最近值，但必须标记无效；`VALID=0` 不得作为报警输入：
