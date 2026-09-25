@@ -1,5 +1,27 @@
 # Mini Program Progress
 
+## 2026-09-25 - 项目全回归总入口
+
+### 已完成
+
+- 新增 `tools/test_all.py`：默认 `COM15`，支持 `--port COMx`；按“Mini Program Node 全量 → 手势/翻译/TTS/康复/远控/报警重点子集 → 现有 Level 3”顺序运行。
+- Node 测试文件由 Python 显式枚举并逐文件传入 `subprocess` argv，不使用 shell 通配符或 `shell=True`。
+- 任一 Node 回归失败时不启动 Level 3；Level 3 本身继续负责 C host、Python、wiring/static 软件门控，软件失败不会进入 Keil Rebuild 或 ST-Link Flash。
+- 总结从当前 Level 3 run 的 artifacts、日志及进程退出码解析；没有阶段证据时显示 `NOT RUN`。Stack watermark 缺失为信息项，`GUARD=0` 为失败。
+- 新增 `tests/test_project_regression.py`，只用 mock/临时 artifacts 覆盖汇总判定、watermark 策略和软件失败门控。
+
+### 当前回归记录
+
+- Mini Program 全量 Node 测试：30/30 个 test 文件通过；总入口内重点回归：17/17 个 test 文件通过。
+- 新增 wrapper 定向 Python 单测：5/5 通过；`py_compile` 语法检查通过。总入口曾在 COM15 和 ST-Link 未连接时安全停止；硬件连接后完整运行并得到 `PROJECT REGRESSION PASS`。
+- 总入口最终实跑：Mini Program Node 30/30、重点回归 17/17、固件 C host 5/5、Python unittest 34/34、wiring/static 3/3 全部通过。
+- Keil `E:\Keil5\Local\Keil_v5\UV4\UV4.exe` 对 `firmware/stm32f407/MDK-ARM/shuangshou.uvprojx` Rebuild：0 Error(s)、0 Warning(s)。HEX SHA-256：`7774438533231df1e931977ad9c4c1d890d1faf26875e40a8a9a3cf34b19c28f`。
+- `E:\download\bin\STM32_Programmer_CLI.exe` 使用 ST-Link SN `00430052310000024E593053` 对 STM32F407ZGTx 下载；CLI 返回码 0，`Download verified successfully`、`MCU Reset`、`Core run` 均已确认。COM15 / 9600 的 `all_bent`、`all_straight`、`mixed`、`normal` 四个硬件 case 全部 PASS。
+- Stack Guard：8 条 watermark 均 `GUARD=1`，每条 `SIZE=4096 / USED=984 / FREE=3112`。完整日志目录：`artifacts/hardware_test/20260925_224541_210375_13840/`。
+- 本次测试期间 ESP-01S 已断开、继电器负载已断电；未连接 BLE、真实 MQTT 或百度 TTS，未驱动实体继电器。
+- 真机回归安全前置：Level 3 cases 含双手全弯；固件可能在保持 3 秒后切至远控模式。重跑前需断开 ESP-01S/PE0 控制链路并隔离继电器负载电源，避免任何真实 MQTT 控制或继电器动作。
+- TTS、BLE、MQTT 和继电器相关 Node 用例保持 mock/fake，不调用真实服务或设备。
+
 ## 2026-09-24 - Level 3 本地硬件一键测试（已完成）
 
 ### 已完成

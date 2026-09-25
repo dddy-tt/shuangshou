@@ -2,11 +2,45 @@
 
 Level 3 是 Level 2 Runner 外层的本地 Windows 编排器：执行软件回归、Keil Rebuild All、检查新生成的 HEX、选择唯一 ST-Link 下载并校验/复位/运行，再逐个调用现有 Level 2 Runner。它不复制 TEST 协议或遥测判断，也不修改 CubeMX、协议和小程序。
 
+## 项目全回归总入口
+
+在仓库根目录运行：
+
+```powershell
+python tools/test_all.py
+```
+
+默认串口为 `COM15`，也可以覆盖：
+
+```powershell
+python tools/test_all.py --port COM7
+```
+
+总入口按以下顺序执行：
+
+1. 显式枚举并逐文件运行 `miniprogram/test/*.test.js` 全量 Node 测试。
+2. 运行手势、翻译、TTS、康复、远控和报警重点回归子集。
+3. 只有以上两组全部通过时，才调用 `python tools/glove_test/test_hardware.py --port <port>`。
+4. Level 3 先做 COM、Keil、Programmer、ST-Link 等安全预检；预检成功后执行 C host、Python unittest、wiring/static。任一软件阶段失败都会在 Keil Build 和 ST-Link Flash 之前停止。软件检查全部通过后，由 Level 3 完成 Rebuild、唯一 ST-Link Flash/Verify/Reset/Run、串口硬件 cases 和 Stack Guard 检查。
+
+汇总按 test 文件数报告 Mini Program 与重点子集，并逐项显示 Firmware Host Tests、Python Unit Tests、Static/Wiring Tests、Keil Rebuild、ST-Link Flash、STM32 Hardware Cases、Stack Guard 和 `PROJECT REGRESSION PASS/FAIL`。Level 3 子阶段只从本轮 `artifacts/hardware_test/<run>/` 的 `summary.txt`、日志和退出码判定；未执行阶段显示 `NOT RUN`，不会当作 PASS。未收到 stack watermark 时按 Level 3 规则显示信息项；`GUARD=0` 一定使该项和总回归失败。
+
+小程序 Node 回归只运行仓库中的本地测试文件。TTS、BLE、MQTT 等测试使用 mock/fake，不会调用真实百度 TTS、建立 BLE 连接、连接 MQTT broker 或驱动继电器。默认总入口会执行 Level 3 的真实构建、下载和 COM 串口测试；运行前请按下文确认接线、目标板和串口。
+
+真机 Level 3 前还必须断开 ESP-01S（避免固件经 PE0 发送真实 MQTT 控制消息），并断开/关闭继电器负载电源。测试 cases 含双手全弯姿态；固件在双手全弯持续 3 秒后会切换工作模式，若 ESP-01S 仍连接，存在进入远控并发布消息的可能。测试无需 BLE、ESP-01S、MQTT Broker、语音云服务或继电器负载。此物理隔离是防误动作措施，软件脚本不能替代确认接线。
+
+### 最近一次本机执行记录（2026-09-25）
+
+- Mini Program：30/30；重点回归：17/17；总入口 mock 单测：5/5。
+- 独立 Level 3 软件检查：C host 5/5、Python unittest 34/34、wiring/static 3/3；Keil Rebuild：0 errors、0 warnings。
+- 总入口最初因 COM15 / ST-Link 未就绪而在预检阶段安全停止；硬件接好并隔离 ESP-01S/继电器后，完整回归 `PROJECT REGRESSION PASS`：Mini Program 30/30、重点 17/17、固件 host 5/5、Python 34/34、wiring 3/3、Keil 0/0、Flash Verify/Reset/Run、4/4 硬件 cases、8 条 Stack Guard watermark 全部通过。日志目录：`artifacts/hardware_test/20260925_224541_210375_13840/`。
+
 ## 接线与安全
 
 - ST-Link 保持连接 STM32，用于下载、校验和复位。
 - USB-TTL 接 USART3：STM32 PC10/TX → USB-TTL RX；STM32 PC11/RX ← USB-TTL TX；GND ↔ GND。串口为 9600、8N1、3.3V TTL。
 - ST-Link 与 USB-TTL 可以同时连接。测试时必须断开 JDY-23，避免 JDY-23 TX 与 USB-TTL TX 同时驱动 PC11/RX。
+- 必须断开 ESP-01S 与 PE0 的控制链路，并让继电器负载断电/隔离；Level 3 不需要真实 MQTT 或继电器。
 - USB-TTL 的 VCC 不接开发板供电；开发板使用原有稳定电源。
 - `--port` 必须指定 USB-TTL 的串口号（例如 COM15）；不要把 ST-Link VCP 的 COM8 当成测试串口。
 
