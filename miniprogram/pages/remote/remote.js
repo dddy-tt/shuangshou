@@ -119,7 +119,7 @@ Page({
     const devices = this.deviceStore.list();
     const selectedDeviceId = this.deviceStore.selectedId();
     this.mqtt.registerDevices(devices);
-    this.controlGestures = this.gestureStore.list().filter((gesture) => gesture.category === 'control' && gesture.enabled !== false);
+    this.controlGestures = this.gestureStore.list().filter((gesture) => gesture.category === 'control' && gesture.enabled !== false && !gesture.needsResample);
     this.gestureBindings = this.deviceStore.listBindings();
     const devicePickerNames = [
       '兼容 legacy 灯',

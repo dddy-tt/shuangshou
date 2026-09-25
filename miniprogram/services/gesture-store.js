@@ -16,9 +16,16 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function hasFingerMask(mask) {
+  return Array.isArray(mask)
+    && mask.length === 10
+    && mask.every((enabled) => typeof enabled === 'boolean');
+}
+
 function normalizeGesture(input = {}, options = {}) {
   const now = new Date().toISOString();
   const fingers = Array.isArray(input.fingers) ? input.fingers.slice(0, 10) : [];
+  const enabledFingers = hasFingerMask(input.enabledFingers) ? input.enabledFingers.slice() : null;
   const action = String(input.action || input.text || '').trim();
   const createdAt = input.createdAt || now;
   return {
@@ -29,6 +36,8 @@ function normalizeGesture(input = {}, options = {}) {
     category: ['translation', 'training', 'control'].includes(input.category) ? input.category : 'translation',
     fingers,
     states: Array.isArray(input.states) ? input.states.slice(0, 10) : [],
+    ...(enabledFingers ? { enabledFingers } : {}),
+    needsResample: !enabledFingers,
     pose: input.pose || null,
     poseTolerance: Number.isFinite(Number(input.poseTolerance)) ? Number(input.poseTolerance) : 8,
     matchPose: Boolean(input.matchPose),

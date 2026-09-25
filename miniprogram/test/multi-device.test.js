@@ -188,8 +188,8 @@ assert.strictEqual(mqtt.getDeviceStatus('fan-renamed').online, null);
 assert.strictEqual(mqtt.getDeviceStatus('fan-renamed').pending, null);
 
 const state = relayState();
-const onGesture = { id: 'on', name: '打开', category: 'control', action: 'ON', fingers: Array(10).fill(20), enabled: true };
-const offGesture = { id: 'off', name: '关闭', category: 'control', action: 'OFF', fingers: Array(10).fill(20), enabled: true };
+const onGesture = { id: 'on', name: '打开', category: 'control', action: 'ON', fingers: Array(10).fill(20), enabledFingers: Array(10).fill(true), enabled: true };
+const offGesture = { id: 'off', name: '关闭', category: 'control', action: 'OFF', fingers: Array(10).fill(20), enabledFingers: Array(10).fill(true), enabled: true };
 const gate = createRelayGestureGate();
 const followBinding = { gestureId: 'on', mode: 'follow-selected', action: 'ON' };
 let result = gate.update([onGesture], state, {

@@ -61,7 +61,7 @@
   <view class="panel">
     <view class="panel-heading"><view class="panel-title">手势绑定设备</view><switch checked="{{gestureControl}}" bindchange="toggleGestureControl" /></view>
     <view class="feedback">{{gestureMessage}}</view>
-    <view wx:if="{{!controlGestures.length}}" class="empty">手势库中没有启用的 control 类 ON / OFF 手势。</view>
+    <view wx:if="{{!controlGestures.length}}" class="empty">没有可用的 control 手势。旧手势需先到手势库重新采样；新建手势时请选择 ON / OFF 控制动作。</view>
     <view wx:for="{{controlGestures}}" wx:key="id" class="gesture-binding-row">
       <view class="gesture-binding-info"><view class="gesture-name">{{item.name}}</view><view class="muted">动作：{{item.action}}</view></view>
       <picker mode="selector" range="{{devicePickerNames}}" value="{{item.bindingIndex}}" data-gesture-id="{{item.id}}" bindchange="handleGestureBindingChange">

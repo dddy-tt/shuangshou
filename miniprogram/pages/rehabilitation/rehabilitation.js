@@ -110,9 +110,9 @@ Page({
   },
 
   chooseTarget() {
-    const gestures = this.store.list().filter((item) => item.enabled);
+    const gestures = this.store.list().filter((item) => item.enabled && !item.needsResample);
     if (!gestures.length) {
-      wx.showToast({ title: '请先在翻译模式建立手势库', icon: 'none' });
+      wx.showToast({ title: '请先录入或重新采样有效手势', icon: 'none' });
       return null;
     }
     return gestures[Math.floor(Math.random() * gestures.length)];

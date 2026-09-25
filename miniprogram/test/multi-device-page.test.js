@@ -51,9 +51,21 @@ const gesture = {
   category: 'control',
   action: 'ON',
   fingers: Array(10).fill(20),
+  enabledFingers: Array(10).fill(true),
   enabled: true
 };
 page.gestureStore.add(gesture);
+page.gestureStore.add({
+  id: 'legacy-control-needs-resample',
+  name: '旧控制模板',
+  category: 'control',
+  action: 'OFF',
+  fingers: Array(10).fill(20),
+  enabled: true
+});
+page.refreshDevices();
+assert.ok(!page.data.controlGestures.some((item) => item.id === 'legacy-control-needs-resample'),
+  '无采样掩码的旧控制手势不能显示为可用远控动作');
 const socket = page.deviceStore.add({ id: 'socket-page', name: '插座' });
 page.deviceStore.bindGesture(gesture.id, 'FAN-PAGE', 'ON');
 page.deviceStore.select(socket.id);

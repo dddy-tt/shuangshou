@@ -14,7 +14,60 @@ Page({
   startPoseRenderer() { if (this.poseTimer) return; this.poseTimer = setInterval(() => { const next = nextPose(this.displayPose, this.targetPose); const key = poseKey(next); this.displayPose = next; if (key === this.lastRenderedPose) return; this.lastRenderedPose = key; this.setData({ pose: { roll: formatMetric(next.roll), pitch: formatMetric(next.pitch), yaw: formatMetric(next.yaw) } }); }, 33); },
   stopPoseRenderer() { if (this.poseTimer) clearInterval(this.poseTimer); this.poseTimer = null; },
   updatePoseTarget(pose) { this.targetPose = { ...pose }; if (this.displayPose.roll === null && Number.isFinite(pose.roll)) this.displayPose = { ...pose }; },
-  applyState(state) { if (!this.active) return; this.updatePoseTarget(state.pose); const enabledFingers = state.calibration.enabledFingers; const hasEnabledFinger = enabledFingers.some(Boolean); const isComplete = hasEnabledFinger && state.flex.every((item, index) => enabledFingers[index] === false || typeof item === 'number'); const patch = {}; const statusTone = state.connected ? 'success' : state.connecting || state.reconnecting ? 'warning' : state.lastError ? 'danger' : 'idle'; const statusLabel = state.connected ? '数据流已连接' : state.connecting ? '连接中' : state.lastError ? '链路异常' : '未连接'; const statusSignature = `${state.connected}|${statusTone}|${statusLabel}`; if (statusSignature !== this.lastStatusSignature) { this.lastStatusSignature = statusSignature; patch.connected = state.connected; patch.statusTone = statusTone; patch.statusLabel = statusLabel; } const usesPoseMatch = this.gestures.some((item) => item.enabled && item.matchPose); const sensorSignature = `${enabledFingers.map(Boolean).join('')}|${state.flex.map((value) => Number.isFinite(value) ? value.toFixed(3) : '-').join('|')}|${usesPoseMatch ? poseKey(state.pose) : ''}`; if (sensorSignature !== this.lastSensorSignature) { this.lastSensorSignature = sensorSignature; patch.left = state.flex.slice(0, 5).map((item, index) => toFinger(item, index, enabledFingers[index] !== false)); patch.right = state.flex.slice(5, 10).map((item, index) => toFinger(item, index + 5, enabledFingers[index + 5] !== false)); Object.assign(patch, this.match(state, isComplete, hasEnabledFinger)); } const careSignature = JSON.stringify(state.care); if (careSignature !== this.lastCareSignature) { this.lastCareSignature = careSignature; patch.care = state.care; } const activeAlarm = state.alarm && state.alarm.active && state.alarm.active.length ? state.alarm.active[0] : null; const guardianRole = state.guardian && state.guardian.role || 'unselected'; patch.safetyAlert = activeAlarm; patch.alarmTitle = activeAlarm ? `真实报警：${activeAlarm.label}` : '报警中心'; patch.alarmCopy = activeAlarm ? `设备 ${activeAlarm.deviceId} · BOOT ${activeAlarm.boot} · ID ${activeAlarm.id}` : '查看真实 ALARM 事件；CARE 和姿态角不会冒充报警。'; patch.alarmAudioStatus = state.alarmAudioStatus; patch.guardianRole = guardianRole; patch.canResolveAlarm = Boolean(activeAlarm && state.connected && state.deviceId === activeAlarm.deviceId && guardianRole !== 'guardian'); Object.assign(patch, alarmControls(state, activeAlarm)); if (state.lastFrameAt !== this.lastFrameAt) { this.lastFrameAt = state.lastFrameAt; patch.lastFrame = state.lastFrameAt ? new Date(state.lastFrameAt).toLocaleTimeString('zh-CN', { hour12: false }) : '—'; } if (Object.keys(patch).length) this.setData(patch); },
+  applyState(state) {
+    if (!this.active) return;
+    this.updatePoseTarget(state.pose);
+    const enabledFingers = state.calibration.enabledFingers;
+    const hasEnabledFinger = enabledFingers.some(Boolean);
+    const isComplete = hasEnabledFinger && state.flex.every((item, index) => enabledFingers[index] === false || typeof item === 'number');
+    const patch = {};
+    const statusTone = state.connected ? 'success' : state.connecting || state.reconnecting ? 'warning' : state.lastError ? 'danger' : 'idle';
+    const statusLabel = state.connected ? '数据流已连接' : state.connecting ? '连接中' : state.lastError ? '链路异常' : '未连接';
+    const statusSignature = `${state.connected}|${statusTone}|${statusLabel}`;
+    if (statusSignature !== this.lastStatusSignature) {
+      this.lastStatusSignature = statusSignature;
+      patch.connected = state.connected;
+      patch.statusTone = statusTone;
+      patch.statusLabel = statusLabel;
+    }
+
+    const usesPoseMatch = this.gestures.some((item) => item.enabled && item.matchPose);
+    const sensorSignature = `${enabledFingers.map(Boolean).join('')}|${state.flex.map((value) => Number.isFinite(value) ? value.toFixed(3) : '-').join('|')}|${usesPoseMatch ? poseKey(state.pose) : ''}`;
+    const sensorChanged = sensorSignature !== this.lastSensorSignature;
+    const freshFlexFrame = Number.isFinite(state.lastFlexAt)
+      && state.lastFlexAt > 0
+      && state.lastFlexAt !== this.lastMatchedFlexAt;
+    if (sensorChanged) {
+      this.lastSensorSignature = sensorSignature;
+      patch.left = state.flex.slice(0, 5).map((item, index) => toFinger(item, index, enabledFingers[index] !== false));
+      patch.right = state.flex.slice(5, 10).map((item, index) => toFinger(item, index + 5, enabledFingers[index + 5] !== false));
+    }
+    if (sensorChanged || freshFlexFrame) {
+      // Update before setRecognition can synchronously notify subscribers again.
+      if (freshFlexFrame) this.lastMatchedFlexAt = state.lastFlexAt;
+      Object.assign(patch, this.match(state, isComplete, hasEnabledFinger));
+    }
+
+    const careSignature = JSON.stringify(state.care);
+    if (careSignature !== this.lastCareSignature) {
+      this.lastCareSignature = careSignature;
+      patch.care = state.care;
+    }
+    const activeAlarm = state.alarm && state.alarm.active && state.alarm.active.length ? state.alarm.active[0] : null;
+    const guardianRole = state.guardian && state.guardian.role || 'unselected';
+    patch.safetyAlert = activeAlarm;
+    patch.alarmTitle = activeAlarm ? `真实报警：${activeAlarm.label}` : '报警中心';
+    patch.alarmCopy = activeAlarm ? `设备 ${activeAlarm.deviceId} · BOOT ${activeAlarm.boot} · ID ${activeAlarm.id}` : '查看真实 ALARM 事件；CARE 和姿态角不会冒充报警。';
+    patch.alarmAudioStatus = state.alarmAudioStatus;
+    patch.guardianRole = guardianRole;
+    patch.canResolveAlarm = Boolean(activeAlarm && state.connected && state.deviceId === activeAlarm.deviceId && guardianRole !== 'guardian');
+    Object.assign(patch, alarmControls(state, activeAlarm));
+    if (state.lastFrameAt !== this.lastFrameAt) {
+      this.lastFrameAt = state.lastFrameAt;
+      patch.lastFrame = state.lastFrameAt ? new Date(state.lastFrameAt).toLocaleTimeString('zh-CN', { hour12: false }) : '—';
+    }
+    if (Object.keys(patch).length) this.setData(patch);
+  },
   match(state, isComplete, hasEnabledFinger) { if (!isComplete) { this.matcher.reset(); const recognition = hasEnabledFinger ? '正在等待已启用手指数据' : '请先启用至少一根手指'; this.runtime.setRecognition({ text: '等待手势', status: recognition }); return { recognition, translation: '等待手势' }; } const current = { fingers: state.flex, states: state.fingerStates, pose: state.pose }; const candidate = this.gestures.find((item) => item.enabled && item.category !== 'control' && compareGesture(item, current, { enabledFingers: state.calibration.enabledFingers }).matched); const stable = this.matcher.update(candidate && candidate.id, Date.now()); if (!candidate) { this.lastSpoken = ''; this.runtime.setRecognition({ text: '等待手势', status: '未匹配已保存手势' }); return { recognition: '未匹配已保存手势', translation: '等待手势' }; } const text = candidate.action || candidate.text; this.runtime.setRecognition({ name: candidate.name, text, status: `已匹配「${candidate.name}」` }); if (stable && this.lastSpoken !== candidate.id) { this.lastSpoken = candidate.id; this.speak(text); } return { recognition: `已匹配「${candidate.name}」`, translation: text }; },
   speak(text) { this.tts.speak(text).then((result) => this.setData({ ttsStatus: ttsStatus(result) })).catch(() => this.setData({ ttsStatus: '语音服务暂不可用' })); },
   manualSpeak() { if (this.data.translation !== '等待手势') this.speak(this.data.translation); }, handleAcknowledgeSafety() { if (!this.data.acknowledgeDisabled) this.runtime.acknowledgeSafety(); }, handleRequestResolve() { if (!this.data.safetyAlert || this.data.resolveDisabled) return; this.runtime.requestAlarmResolve(this.data.safetyAlert.eventKey).then((result) => { if (!result.accepted) wx.showToast({ title: result.reason === 'already-pending' ? '正在等待这次设备回执' : result.reason === 'remote-resolve-forbidden' ? '监护者不能远程解除' : '解除请求失败，可重试', icon: 'none' }); else wx.showToast({ title: '请求已发送，等待设备返回 ACTIVE=0', icon: 'none' }); }).catch((error) => wx.showToast({ title: error.message || '解除请求失败', icon: 'none' })); }, goAlarms() { wx.navigateTo({ url: '/pages/alarm/alarm' }); }, goTrain() { wx.navigateTo({ url: '/pages/gesture-train/gesture-train' }); }, goLibrary() { wx.navigateTo({ url: '/pages/gesture-library/gesture-library' }); }, goSettings() { wx.navigateTo({ url: '/pages/settings/settings' }); }

@@ -552,3 +552,45 @@
 - `firmware/stm32f407/tests/test_input_wiring_test.ps1`
 - `.gitignore`（忽略 host ASan 产生的 `.obj` / `.pdb` 编译产物）
 - `docs/level2_virtual_sensor_test.md`、`docs/progress.md`
+
+## 2026-09-24 - 无蓝牙闭环回归与手势误识别修复
+
+### 已完成
+
+- 复现旧手势误命中：采样时关闭的传感器仍可能把陈旧值写进模板，后续匹配却只依据当前启用掩码，导致换用无名指/小指时误触发旧“你好”。新手势现在保存采样时的 10 位 `enabledFingers`；识别仅比较采样时与当前同时启用的通道，掩码无交集时拒绝匹配。
+- 无采样掩码的旧模板无法可靠推断历史传感器状态，现标记“需重新采样”并禁止自动匹配。手势库提供“重新采样并替换”，原位保留手势 ID，因此既有手势设备绑定不会因重录而丢失。
+- 康复目标与远控动作不再选择/展示需重采样的旧模板，并给出重新采样提示。
+- 修复实时翻译仅在弯曲度数值变化时推进稳定识别的问题。现在每个新的 FLEX 帧都能推进稳定计时；即使手指保持静止、数值连续相同，也能完成识别并只自动播报一次。
+- 新增无 BLE 闭环 Node 用例：STM32 格式 FLEX / IMU / ACC 原始文本进入真实协议解析器和 app-state，再由翻译页面识别并调用 TTS 接口；测试断言没有调用 BLE API，ACC 本身不会伪造报警事件。
+
+### 修改文件
+
+- `miniprogram/services/gesture-matcher.js`
+- `miniprogram/services/gesture-store.js`
+- `miniprogram/pages/gesture-train/gesture-train.js`、`.wxml`
+- `miniprogram/pages/gesture-library/gesture-library.js`、`.wxml`、`.wxss`
+- `miniprogram/pages/translation/translation.js`
+- `miniprogram/pages/remote/remote.js`、`.wxml`
+- `miniprogram/pages/rehabilitation/rehabilitation.js`
+- `miniprogram/test/gesture-matcher.test.js`
+- `miniprogram/test/gesture-store.test.js`
+- `miniprogram/test/gesture-pages.test.js`
+- `miniprogram/test/translation-page.test.js`
+- `miniprogram/test/closed-loop-data-flow.test.js`
+- `miniprogram/test/multi-device.test.js`、`multi-device-page.test.js`
+- `miniprogram/test/rehabilitation-speech.test.js`
+- `docs/progress.md`
+
+### 验证
+
+- 全部小程序 Node 测试：28/28 通过。
+- 手势、翻译/TTS、无 BLE 闭环、康复、远控多设备、报警音与报警生命周期等 11 个重点测试连续运行 3 轮，每轮 11/11 通过。
+- 小程序 66 个 JavaScript 文件通过 `node --check`；20 个 JSON 文件解析通过；`app.json` 的 9 个页面资源齐全；`git diff --check` 通过。
+- 本机已有固件主机测试通过：`alarm_engine_test`、`bluetooth_tx_test`、`jy61p_zero_filter_test`；`alarm_wiring_test.ps1` 静态守卫通过。本轮没有修改 STM32 源码，也没有重新编译固件。
+
+### 已知限制与真机待测
+
+- 本次闭环测试是 Node 模拟，没有连接或调用真实 BLE；当前检出的分支也没有开发者工具内的 Simulator 页面，因此新增用例是自动化测试入口，不是小程序可见页面。
+- 本地报警音、百度 TTS 和 MQTT 在自动化中均使用 mock；没有调用百度接口、连接真实 Broker 或发布继电器指令，避免网络/额度副作用及意外驱动实体负载。
+- 没有通过微信开发者工具编译或真机播放音频；本机未找到常见位置的开发者工具 CLI。物理无源蜂鸣器、JY61P 实际采样、手机扬声器音量、百度在线合成、ESP-01 继电器闭环及监护端在线通知仍须在设备/网络可用时单独验证。
+- 更新后请在手势库为旧“你好”点“重新采样并替换”；先在设备状态页关闭坏掉的传感器，再录入姿态。重新录制保留原手势 ID 和远控绑定。

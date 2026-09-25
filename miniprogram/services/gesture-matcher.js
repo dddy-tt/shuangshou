@@ -22,6 +22,12 @@ function classifyFingers(values) {
   return (Array.isArray(values) ? values : []).map(classifyFinger);
 }
 
+function hasFingerMask(mask) {
+  return Array.isArray(mask)
+    && mask.length === 10
+    && mask.every((enabled) => typeof enabled === 'boolean');
+}
+
 function poseMatches(targetPose, currentPose, tolerance) {
   if (!targetPose || !currentPose) {
     return false;
@@ -36,26 +42,37 @@ function poseMatches(targetPose, currentPose, tolerance) {
 }
 
 function compareGesture(target, current, options = {}) {
-  const targetStates = Array.isArray(target && target.states)
+  const targetStates = Array.isArray(target && target.states) && target.states.length === 10
     ? target.states
     : classifyFingers(target && target.fingers);
-  const currentStates = Array.isArray(current && current.states)
+  const currentStates = Array.isArray(current && current.states) && current.states.length === 10
     ? current.states
     : classifyFingers(current && current.fingers);
   const differences = [];
-  const length = Math.max(targetStates.length, currentStates.length);
-  const enabledFingers = Array.isArray(options.enabledFingers) ? options.enabledFingers : null;
+  const sampledFingers = target && target.enabledFingers;
+  const enabledFingers = options.enabledFingers;
+  const hasSampleMask = hasFingerMask(sampledFingers);
+  const hasCurrentMask = hasFingerMask(enabledFingers);
   let enabledCount = 0;
 
-  for (let index = 0; index < length; index += 1) {
-    if (enabledFingers && enabledFingers[index] === false) continue;
-    enabledCount += 1;
-    if (targetStates[index] !== currentStates[index]) {
-      differences.push({
-        index,
-        expected: targetStates[index] || null,
-        actual: currentStates[index] || null
-      });
+  if (!hasSampleMask) {
+    differences.push({ index: -3, expected: 'sampled-finger-mask', actual: 'missing-or-invalid' });
+  }
+  if (!hasCurrentMask) {
+    differences.push({ index: -4, expected: 'current-finger-mask', actual: 'missing-or-invalid' });
+  }
+
+  if (hasSampleMask && hasCurrentMask) {
+    for (let index = 0; index < 10; index += 1) {
+      if (sampledFingers[index] !== true || enabledFingers[index] !== true) continue;
+      enabledCount += 1;
+      if (!targetStates[index] || !currentStates[index] || targetStates[index] !== currentStates[index]) {
+        differences.push({
+          index,
+          expected: targetStates[index] || null,
+          actual: currentStates[index] || null
+        });
+      }
     }
   }
 
