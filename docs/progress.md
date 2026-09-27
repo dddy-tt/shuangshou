@@ -1,5 +1,15 @@
 # Mini Program Progress
 
+## 2026-09-27 - Level 4A 可选动作验收（待复测）
+
+- 已完成 Keil Rebuild、唯一 ST-Link Flash/Verify/Reset/Run 和 COM15 REAL 静态采集；静态健康再次 PASS。
+- 发现旧 `--motion-check` 将等待真人期间的串口积压帧计入动作窗口，且没有检查运动过程 I2C/AGE/恢复/栈，旧 PASS 不能作验收依据。已修 PC 采集器并新增独立动作健康/连续变化检查；STM32 固件源码、CubeMX 和小程序均未修改。
+- 新采集的真实动作 Roll 跨度 37.88°，ONLINE 100%，最大 AGE 2 ms，栈 GUARD=1；但 I2C 错误增量 3/1/1（总 5 次，阈值 3），动作 FAIL。详见 `docs/level4a_real_imu_test.md` 和 `artifacts/real_imu/20260927_223353_804883/`。
+- 第二次全构建/烧录后的静态阶段因移动/连线受力失败（ONLINE 68.8%，I2C 31/39/41，恢复 17/11/6），未进入动作采集。随后放稳板子，仅串口静置复核 15 秒再次 PASS（ONLINE 100%，AGE 2 ms，I2C/恢复增量 0）。动作健康尚未通过，不进入 Level 4B。
+- Python 单测全量 51/51 通过；未完成动作健康验收，需固定 JY61P 连线后受控复测。
+- 远程同步动作复测确认 JY61P 本体真实响应：Roll -36.22–52.12°、Pitch 3.77–18.72°、Yaw -1.66–28.03°；但动作 ONLINE 90%、ACC 有效 80%、AGE 最大 982 ms，I2C 错误增量 23/23/21、恢复 15/8/7，栈最低剩余 3312 bytes/守卫 1。运动中反复 AF/NACK 和离线，动作验收 FAIL。证据 `artifacts/real_imu/20260927_224438_395116/`；需要断电后由人检查/固定 VCC/GND/PB6/PB7 等物理连接，复测前不修改固件，不标记 MOTION VERIFIED。
+- 修改文件：`tools/glove_test/test_real_imu.py`、`tests/test_real_imu_health.py`、本文件和 `docs/level4a_real_imu_test.md`。测试：`python -m unittest discover -s tests -v`，以及 `python tools/glove_test/test_real_imu.py --port COM15 --motion-check`。已知问题：移动时偶发 I2C 错误，物理原因未确认。
+
 ## 2026-09-25 - Level 4A 真实 JY61P 采集与自动回归
 
 ### 已完成

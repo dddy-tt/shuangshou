@@ -31,7 +31,7 @@ KNOWN_ERROR_MASK = 0x1F
 HAL_I2C_ERROR_BITS = {
     0x01: "BERR", 0x02: "ARLO", 0x04: "AF", 0x08: "OVR",
     0x10: "DMA", 0x20: "TIMEOUT", 0x40: "SIZE",
-    0x80: "DMA_PARAM", 0x100: "INVALID_CALLBACK",
+    0x80: "DMA_PARAM", 0x100: "INVALID_CALLBACK", 0x200: "WRONG_START",
 }
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
 
@@ -495,24 +495,49 @@ def _establish_real_mode(port: Any, log: Any, capture: Capture, start: float) ->
 def _capture_window(port: Any, log: Any, capture: Capture, duration: float,
                     start: float, label: str) -> None:
     deadline = time.monotonic() + duration
-    print(f"[{label}] collecting for {duration:.1f}s; keep the board still")
+    instruction = "keep the board still" if label == "STATIC HEALTH" else "tilt slowly, then return"
+    print(f"[{label}] collecting for {duration:.1f}s; {instruction}")
     while time.monotonic() < deadline:
         _read_line(port, log, capture, start)
 
 
-def _motion_check(port: Any, log: Any, capture: Capture, start: float) -> bool:
-    input("静态健康测试已通过。请把板子拿稳；按回车后在 10 秒内缓慢倾斜一次（不要跌落或剧烈摇晃）...")
-    first = len(capture.imu)
-    _capture_window(port, log, capture, 10.0, start, "MOTION CHECK")
-    samples = capture.imu[first:]
-    if len(samples) < 10:
-        return False
-    spans = [max(values[i] for _, values in samples) - min(values[i] for _, values in samples)
-             for i in range(3)]
-    latest_online = [row["ONLINE"] for _, row in capture.debug[-5:]]
-    result = max(spans, default=0.0) >= 8.0 and bool(latest_online) and all(latest_online)
-    print(f"Motion angle spans (deg): {spans}; {'PASS' if result else 'FAIL'}")
-    return result
+def assess_motion(capture: Capture, duration: float, real_acknowledged: bool) -> dict[str, Any]:
+    """Apply the same sensor-health gates to an independent, fresh motion window."""
+    report = assess(capture, duration, real_acknowledged)
+    spans = [maximum - minimum for minimum, maximum in zip(
+        report["metrics"]["imu_min"] or [], report["metrics"]["imu_max"] or []
+    )]
+    # A lone spike or a +/-180 degree wrap is not a continuous hand tilt.
+    continuous_axes = []
+    for axis in range(3):
+        steps = [abs(right[axis] - left[axis]) for (_, left), (_, right) in zip(
+            capture.imu, capture.imu[1:]
+        )]
+        continuous_axes.append(
+            bool(spans) and spans[axis] >= 8.0
+            and sum(0.5 <= step <= 60.0 for step in steps) >= 3
+        )
+    online = capture.debug + capture.jy
+    report["metrics"]["imu_span"] = spans
+    report["metrics"]["motion_continuous_axes"] = continuous_axes
+    report["checks"]["Continuous motion >= 8 deg"] = any(continuous_axes)
+    report["checks"]["ONLINE throughout motion"] = bool(online) and all(
+        row["ONLINE"] == 1 for _, row in online
+    )
+    return report
+
+
+def _motion_check(port: Any, log: Any, capture: Capture, start: float,
+                  duration: float) -> dict[str, Any]:
+    # The human prompt happens before opening the port. Discard any serial
+    # backlog once opened; otherwise old frames can satisfy the motion test.
+    port.reset_input_buffer()
+    _capture_window(port, log, capture, duration, start, "MOTION CHECK")
+    report = assess_motion(capture, duration, True)
+    failed = [name for name, passed in report["checks"].items() if not passed]
+    print(f"Motion angle spans (deg): {report['metrics']['imu_span']}")
+    print(f"Motion health: {'PASS' if not failed else 'FAIL ' + ', '.join(failed)}")
+    return report
 
 
 def _report(report: dict[str, Any], out: Any = sys.stdout) -> bool:
@@ -613,6 +638,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-flash", action="store_true")
     parser.add_argument("--motion-check", action="store_true",
                         help="after static PASS, prompt for a slow manual tilt check")
+    parser.add_argument("--motion-duration", type=float, default=10.0,
+                        help="motion capture duration, 10 to 30 seconds (default: 10)")
     return parser
 
 
@@ -623,6 +650,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.baud <= 0:
         print("FAIL: --baud must be positive", file=sys.stderr)
+        return 2
+    if not 10.0 <= args.motion_duration <= 30.0:
+        print("FAIL: --motion-duration must be between 10 and 30 seconds", file=sys.stderr)
         return 2
     if args.skip_build and not args.skip_flash:
         print("FAIL: --skip-build requires --skip-flash to prevent flashing a stale HEX", file=sys.stderr)
@@ -659,9 +689,14 @@ def main(argv: list[str] | None = None) -> int:
         if static_pass and args.motion_check:
             # Dynamic validation is deliberately opt-in and requires explicit
             # human movement; it is never part of the default static run.
+            input(f"静态健康测试已通过。请把板子拿稳；按回车后在 {args.motion_duration:g} 秒内缓慢倾斜一次（不要跌落或剧烈摇晃）...")
+            motion_capture = Capture()
             with serial.Serial(args.port, args.baud, timeout=0.2, write_timeout=1.0) as port, \
                  serial_path.open("a", encoding="utf-8", newline="") as log:
-                motion_pass = _motion_check(port, log, capture, start)
+                motion_report = _motion_check(port, log, motion_capture, start,
+                                              args.motion_duration)
+            motion_pass = all(motion_report["checks"].values())
+            report["motion"] = motion_report
             motion_result = "PASS" if motion_pass else "FAIL"
             report["checks"]["Optional motion check"] = motion_pass
         else:

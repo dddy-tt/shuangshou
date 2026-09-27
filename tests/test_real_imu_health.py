@@ -33,9 +33,9 @@ def debug_line(*, online=1, err=0, last=0, acc_raw="0,0,2048",
 def healthy_capture(duration=15.0, *, initial_i2cerr=(0, 0, 0),
                     initial_rec=(0, 0, 0)):
     capture = RUNNER.Capture()
-    for t in (0.0, 5.0, 10.0):
+    for t in range(0, int(duration), 5):
         capture.add_line("BRINGUP: JY=1,JY_RET=0,ADC1=1,ADC2=1,BEEP=1", t)
-    for second in range(15):
+    for second in range(int(duration)):
         t = float(second)
         capture.add_line("JY|ONLINE=1|ERR=0|LAST=0|AGE=10", t)
         capture.add_line("ACC|X=0.000|Y=0.000|Z=1.000|VALID=1", t + 0.02)
@@ -45,10 +45,10 @@ def healthy_capture(duration=15.0, *, initial_i2cerr=(0, 0, 0),
                        rec=",".join(map(str, initial_rec))),
             t + 0.03,
         )
-    for tick in range(60):
+    for tick in range(int(duration * 4)):
         t = tick * 0.25 + 0.05
         capture.add_line("IMU|R=0.00|P=0.00|Y=0.00", t)
-    for t in (0.2, 3.2, 6.2, 9.2, 12.2):
+    for t in range(0, int(duration), 3):
         capture.add_line("[STACK]|SIZE=4096|USED=1024|FREE=3072|GUARD=1", t)
     return capture
 
@@ -77,6 +77,36 @@ class RealImuParserTests(unittest.TestCase):
         self.assertAlmostEqual(report["metrics"]["online_ratio"], 1.0)
         self.assertAlmostEqual(report["metrics"]["read_rate_hz"], 100.0)
         self.assertEqual(report["metrics"]["acc_raw_formal_mismatches"], 0)
+
+    def test_fresh_motion_health_and_angle_span_pass(self):
+        capture = healthy_capture(10.0)
+        for t, roll in ((7.0, 4), (7.5, 8), (8.0, 12), (8.5, 15)):
+            capture.add_line(f"IMU|R={roll:.2f}|P=0.00|Y=0.00", t)
+        report = RUNNER.assess_motion(capture, 10.0, True)
+        self.assertTrue(all(report["checks"].values()), report["checks"])
+        self.assertEqual(report["metrics"]["imu_span"], [15.0, 0.0, 0.0])
+
+    def test_single_motion_spike_is_not_continuous_tilt(self):
+        capture = healthy_capture(10.0)
+        capture.add_line("IMU|R=15.00|P=0.00|Y=0.00", 9.8)
+        report = RUNNER.assess_motion(capture, 10.0, True)
+        self.assertFalse(report["checks"]["Continuous motion >= 8 deg"])
+
+    def test_motion_angle_change_does_not_hide_bus_error_storm(self):
+        capture = healthy_capture(10.0)
+        for t, roll in ((7.0, 4), (7.5, 8), (8.0, 12), (8.5, 15)):
+            capture.add_line(f"IMU|R={roll:.2f}|P=0.00|Y=0.00", t)
+        capture.add_line(debug_line(i2cerr="6,3,5", rec="2,2,0", reads=1000), 9.7)
+        report = RUNNER.assess_motion(capture, 10.0, True)
+        self.assertTrue(report["checks"]["Continuous motion >= 8 deg"])
+        self.assertFalse(report["checks"]["I2C errors/recovery stable"])
+
+    def test_motion_offline_status_fails_even_if_last_debug_is_online(self):
+        capture = healthy_capture(10.0)
+        capture.add_line("IMU|R=15.00|P=0.00|Y=0.00", 9.8)
+        capture.add_line("JY|ONLINE=0|ERR=3|LAST=4|AGE=200", 5.5)
+        report = RUNNER.assess_motion(capture, 10.0, True)
+        self.assertFalse(report["checks"]["ONLINE throughout motion"])
 
     def test_one_angle_zero_is_transient_not_an_i2c_failure(self):
         capture = healthy_capture()
