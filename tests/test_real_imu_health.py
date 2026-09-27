@@ -53,6 +53,11 @@ def healthy_capture(duration=15.0, *, initial_i2cerr=(0, 0, 0),
     return capture
 
 
+def add_continuous_roll(capture):
+    for t, roll in ((7.0, 4), (7.5, 8), (8.0, 12), (8.5, 15)):
+        capture.add_line(f"IMU|R={roll:.2f}|P=0.00|Y=0.00", t)
+
+
 class RealImuParserTests(unittest.TestCase):
     def test_parses_all_real_sensor_frames_and_unsigned_counters(self):
         capture = RUNNER.Capture()
@@ -78,10 +83,125 @@ class RealImuParserTests(unittest.TestCase):
         self.assertAlmostEqual(report["metrics"]["read_rate_hz"], 100.0)
         self.assertEqual(report["metrics"]["acc_raw_formal_mismatches"], 0)
 
+    def test_i2c_error_rates_normalize_per_vector_transaction(self):
+        capture = healthy_capture(20.0)
+        capture.add_line(debug_line(reads=2000, i2cerr="4,4,4"), 19.9)
+        metrics = RUNNER.assess(capture, 20.0, True)["metrics"]
+
+        self.assertEqual(metrics["read_cycles_delta"], 2000)
+        self.assertEqual(metrics["expected_i2c_transactions"], 6000)
+        self.assertEqual(metrics["i2c_error_total"], 12)
+        self.assertAlmostEqual(metrics["i2c_error_rates"]["ACC"], 0.002)
+        self.assertAlmostEqual(metrics["i2c_error_rates"]["GYRO"], 0.002)
+        self.assertAlmostEqual(metrics["i2c_error_rates"]["ANGLE"], 0.002)
+        self.assertAlmostEqual(metrics["total_i2c_error_rate"], 0.002)
+
+    def test_same_error_count_has_duration_normalized_rate(self):
+        rates = []
+        for duration, reads in ((10.0, 1000), (20.0, 2000)):
+            capture = healthy_capture(duration)
+            capture.add_line(
+                debug_line(reads=reads, i2cerr="4,4,4"), duration - 0.1
+            )
+            metrics = RUNNER.assess(capture, duration, True)["metrics"]
+            self.assertEqual(metrics["i2c_error_total"], 12)
+            rates.append(metrics["total_i2c_error_rate"])
+
+        self.assertAlmostEqual(rates[0], 0.004)
+        self.assertAlmostEqual(rates[1], 0.002)
+
+    def test_motion_20s_12_errors_passes_with_warning_at_0_2_percent(self):
+        capture = healthy_capture(20.0)
+        add_continuous_roll(capture)
+        capture.add_line(debug_line(reads=2000, i2cerr="3,6,3"), 19.9)
+
+        report = RUNNER.assess_motion(capture, 20.0, True)
+
+        self.assertTrue(all(report["checks"].values()), report["checks"])
+        self.assertEqual(report["metrics"]["expected_i2c_transactions"], 6000)
+        self.assertEqual(report["metrics"]["i2c_error_counts_delta_during_window"], (3, 6, 3))
+        self.assertAlmostEqual(report["metrics"]["i2c_error_rates"]["ACC"], 0.0015)
+        self.assertAlmostEqual(report["metrics"]["i2c_error_rates"]["GYRO"], 0.003)
+        self.assertAlmostEqual(report["metrics"]["i2c_error_rates"]["ANGLE"], 0.0015)
+        self.assertAlmostEqual(report["metrics"]["total_i2c_error_rate"], 0.002)
+        self.assertEqual(report["metrics"]["motion_health_status"], "PASS WITH WARNING")
+
+    def test_per_sensor_rate_limit_applies_even_when_total_rate_is_low(self):
+        capture = healthy_capture(20.0)
+        add_continuous_roll(capture)
+        capture.add_line(debug_line(reads=2000, i2cerr="12,0,0"), 19.9)
+
+        report = RUNNER.assess_motion(capture, 20.0, True)
+
+        self.assertAlmostEqual(report["metrics"]["total_i2c_error_rate"], 0.002)
+        self.assertGreater(report["metrics"]["i2c_error_rates"]["ACC"], 0.005)
+        self.assertFalse(report["checks"]["I2C errors/recovery stable"])
+        self.assertEqual(report["metrics"]["motion_health_status"], "FAIL")
+
+    def test_single_successful_recovery_is_reported_as_warning(self):
+        capture = healthy_capture(10.0)
+        add_continuous_roll(capture)
+        capture.add_line(debug_line(reads=1000, rec="1,1,0"), 9.7)
+
+        report = RUNNER.assess_motion(capture, 10.0, True)
+
+        self.assertTrue(all(report["checks"].values()), report["checks"])
+        self.assertEqual(report["metrics"]["i2c_error_total"], 0)
+        self.assertEqual(report["metrics"]["motion_i2c_error_status"], "WARN")
+        self.assertEqual(report["metrics"]["motion_health_status"], "PASS WITH WARNING")
+
+    def test_low_i2c_error_rate_does_not_hide_any_offline_sample(self):
+        capture = healthy_capture(10.0)
+        add_continuous_roll(capture)
+        capture.add_line("JY|ONLINE=0|ERR=3|LAST=4|AGE=10", 5.5)
+        capture.add_line(debug_line(online=0, err=3, last=4, reads=1000,
+                                    i2cerr="1,0,0"), 9.7)
+
+        report = RUNNER.assess_motion(capture, 10.0, True)
+
+        self.assertLess(report["metrics"]["total_i2c_error_rate"], 0.005)
+        self.assertFalse(report["checks"]["ONLINE throughout motion"])
+        self.assertEqual(report["metrics"]["motion_health_status"], "FAIL")
+
+    def test_low_i2c_error_rate_does_not_hide_stale_age(self):
+        capture = healthy_capture(10.0)
+        add_continuous_roll(capture)
+        capture.add_line(debug_line(aage=982, gage=982, tage=982, reads=1000,
+                                    i2cerr="1,0,0"), 9.7)
+
+        report = RUNNER.assess_motion(capture, 10.0, True)
+
+        self.assertLess(report["metrics"]["total_i2c_error_rate"], 0.005)
+        self.assertFalse(report["checks"]["Freshness <= 120 ms"])
+        self.assertEqual(report["metrics"]["motion_health_status"], "FAIL")
+
+    def test_low_i2c_error_rate_does_not_hide_recovery_storm(self):
+        capture = healthy_capture(10.0)
+        add_continuous_roll(capture)
+        capture.add_line(debug_line(reads=1000, rec="3,3,0"), 9.7)
+
+        report = RUNNER.assess_motion(capture, 10.0, True)
+
+        self.assertEqual(report["metrics"]["total_i2c_error_rate"], 0.0)
+        self.assertFalse(report["checks"]["I2C errors/recovery stable"])
+        self.assertEqual(report["metrics"]["motion_health_status"], "FAIL")
+
+    def test_high_i2c_error_rate_fails_even_when_latest_online_is_one(self):
+        capture = healthy_capture(20.0)
+        add_continuous_roll(capture)
+        capture.add_line(debug_line(online=1, reads=2000,
+                                    i2cerr="20,20,20"), 19.9)
+
+        report = RUNNER.assess_motion(capture, 20.0, True)
+
+        self.assertTrue(report["checks"]["ONLINE throughout motion"])
+        self.assertGreater(report["metrics"]["total_i2c_error_rate"], 0.005)
+        self.assertFalse(report["checks"]["I2C errors/recovery stable"])
+        self.assertEqual(report["metrics"]["motion_health_status"], "FAIL")
+
     def test_fresh_motion_health_and_angle_span_pass(self):
         capture = healthy_capture(10.0)
-        for t, roll in ((7.0, 4), (7.5, 8), (8.0, 12), (8.5, 15)):
-            capture.add_line(f"IMU|R={roll:.2f}|P=0.00|Y=0.00", t)
+        add_continuous_roll(capture)
         report = RUNNER.assess_motion(capture, 10.0, True)
         self.assertTrue(all(report["checks"].values()), report["checks"])
         self.assertEqual(report["metrics"]["imu_span"], [15.0, 0.0, 0.0])
@@ -94,8 +214,7 @@ class RealImuParserTests(unittest.TestCase):
 
     def test_motion_angle_change_does_not_hide_bus_error_storm(self):
         capture = healthy_capture(10.0)
-        for t, roll in ((7.0, 4), (7.5, 8), (8.0, 12), (8.5, 15)):
-            capture.add_line(f"IMU|R={roll:.2f}|P=0.00|Y=0.00", t)
+        add_continuous_roll(capture)
         capture.add_line(debug_line(i2cerr="6,3,5", rec="2,2,0", reads=1000), 9.7)
         report = RUNNER.assess_motion(capture, 10.0, True)
         self.assertTrue(report["checks"]["Continuous motion >= 8 deg"])

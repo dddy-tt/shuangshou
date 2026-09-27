@@ -34,6 +34,8 @@ HAL_I2C_ERROR_BITS = {
     0x80: "DMA_PARAM", 0x100: "INVALID_CALLBACK", 0x200: "WRONG_START",
 }
 NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+JY_VECTOR_TRANSACTIONS_PER_READ = 3
+MOTION_I2C_ERROR_RATE_LIMIT = 0.005
 
 
 class RealImuError(RuntimeError):
@@ -288,12 +290,14 @@ def assess(capture: Capture, duration: float, real_acknowledged: bool) -> dict[s
     max_age = max(age_values) if age_values else None
 
     read_rate: float | None = None
+    read_cycles_delta: int | None = None
     if len(capture.debug) >= 2:
         first_at, first = capture.debug[0]
         last_at, last = capture.debug[-1]
         span = last_at - first_at
         if span > 0 and last["READS"] >= first["READS"]:
-            read_rate = (last["READS"] - first["READS"]) / span
+            read_cycles_delta = last["READS"] - first["READS"]
+            read_rate = read_cycles_delta / span
 
     latest_debug = debug[-1] if debug else None
     first_debug = debug[0] if debug else None
@@ -317,6 +321,21 @@ def assess(capture: Capture, duration: float, real_acknowledged: bool) -> dict[s
     first_recovery_counts = first_debug["REC"] if first_debug else None
     recovery_delta = counter_delta("REC", 3)
     bus_error_total = sum(error_delta) if error_delta is not None else None
+    expected_i2c_transactions = (
+        read_cycles_delta * JY_VECTOR_TRANSACTIONS_PER_READ
+        if read_cycles_delta is not None else None
+    )
+    i2c_error_rates = {
+        name: (error_delta[index] / read_cycles_delta
+               if error_delta is not None and read_cycles_delta is not None
+               and read_cycles_delta > 0 else None)
+        for index, name in enumerate(("ACC", "GYRO", "ANGLE"))
+    }
+    total_i2c_error_rate = (
+        bus_error_total / expected_i2c_transactions
+        if bus_error_total is not None and expected_i2c_transactions is not None
+        and expected_i2c_transactions > 0 else None
+    )
     zero_count = latest_debug["ZERO"] if latest_debug else 0
     hal_error_counts = {name: 0 for name in HAL_I2C_ERROR_BITS.values()}
     for _, row in capture.debug:
@@ -420,6 +439,10 @@ def assess(capture: Capture, duration: float, real_acknowledged: bool) -> dict[s
             "i2c_error_counts_delta_during_window": error_delta,
             "i2c_error_counts_acc_gyro_angle": error_counts,
             "i2c_error_total": bus_error_total,
+            "read_cycles_delta": read_cycles_delta,
+            "expected_i2c_transactions": expected_i2c_transactions,
+            "i2c_error_rates": i2c_error_rates,
+            "total_i2c_error_rate": total_i2c_error_rate,
             "recovery_counts_at_window_start": first_recovery_counts,
             "recovery_counts_at_window_end": recovery_counts if latest_debug else None,
             "recovery_counts_delta_during_window": recovery_delta,
@@ -502,7 +525,7 @@ def _capture_window(port: Any, log: Any, capture: Capture, duration: float,
 
 
 def assess_motion(capture: Capture, duration: float, real_acknowledged: bool) -> dict[str, Any]:
-    """Apply the same sensor-health gates to an independent, fresh motion window."""
+    """Apply motion health gates with transaction-normalized I2C errors."""
     report = assess(capture, duration, real_acknowledged)
     spans = [maximum - minimum for minimum, maximum in zip(
         report["metrics"]["imu_min"] or [], report["metrics"]["imu_max"] or []
@@ -524,6 +547,35 @@ def assess_motion(capture: Capture, duration: float, real_acknowledged: bool) ->
     report["checks"]["ONLINE throughout motion"] = bool(online) and all(
         row["ONLINE"] == 1 for _, row in online
     )
+
+    metrics = report["metrics"]
+    error_rates = metrics["i2c_error_rates"]
+    total_error_rate = metrics["total_i2c_error_rate"]
+    rates_available = total_error_rate is not None and all(
+        rate is not None for rate in error_rates.values()
+    )
+    error_rate_ok = bool(rates_available) and total_error_rate <= MOTION_I2C_ERROR_RATE_LIMIT and all(
+        rate <= MOTION_I2C_ERROR_RATE_LIMIT for rate in error_rates.values()
+    )
+    recovery_delta = metrics["recovery_counts_delta_during_window"]
+    recovery_ok = (
+        recovery_delta is not None
+        and recovery_delta[0] <= 1
+        and recovery_delta[2] == 0
+    )
+    report["checks"]["I2C errors/recovery stable"] = error_rate_ok and recovery_ok
+    metrics["motion_i2c_error_rate_limit"] = MOTION_I2C_ERROR_RATE_LIMIT
+    metrics["motion_i2c_error_status"] = (
+        "FAIL" if not error_rate_ok or not recovery_ok
+        else "WARN" if (metrics["i2c_error_total"] or 0) > 0 or recovery_delta[0] > 0
+        else "PASS"
+    )
+    failed = [name for name, passed in report["checks"].items() if not passed]
+    metrics["motion_health_status"] = (
+        "FAIL" if failed
+        else "PASS WITH WARNING" if metrics["motion_i2c_error_status"] == "WARN"
+        else "PASS"
+    )
     return report
 
 
@@ -535,8 +587,35 @@ def _motion_check(port: Any, log: Any, capture: Capture, start: float,
     _capture_window(port, log, capture, duration, start, "MOTION CHECK")
     report = assess_motion(capture, duration, True)
     failed = [name for name, passed in report["checks"].items() if not passed]
-    print(f"Motion angle spans (deg): {report['metrics']['imu_span']}")
-    print(f"Motion health: {'PASS' if not failed else 'FAIL ' + ', '.join(failed)}")
+    metrics = report["metrics"]
+    print(f"Motion angle spans (deg): {metrics['imu_span']}")
+    rate_text = ", ".join(
+        f"{name}={rate:.3%}" if rate is not None else f"{name}=N/A"
+        for name, rate in metrics["i2c_error_rates"].items()
+    )
+    total_rate = metrics["total_i2c_error_rate"]
+    total_rate_text = f"{total_rate:.3%}" if total_rate is not None else "N/A"
+    print(
+        f"Motion I2C: READS delta={metrics['read_cycles_delta']}; "
+        f"expected transactions={metrics['expected_i2c_transactions']}; "
+        f"ACC/GYRO/ANGLE errors={metrics['i2c_error_counts_delta_during_window']}; "
+        f"rates {rate_text}; total={total_rate_text}; "
+        f"limit={metrics['motion_i2c_error_rate_limit']:.2%}"
+    )
+    print(
+        f"Motion health data: ONLINE={metrics['online_ratio']:.1%}; "
+        f"ACC valid={metrics['acc_valid_ratio']:.1%}; "
+        f"ANGLE valid={metrics['angle_valid_ratio']:.1%}; "
+        f"max AGE={metrics['max_age_ms']} ms; "
+        f"recovery delta={metrics['recovery_counts_delta_during_window']}; "
+        f"HALERR latest={metrics['hal_error_latest_acc_gyro_angle_probe']}; "
+        f"HALERR observations={metrics['hal_error_observations_by_bit']}; "
+        f"stack FREE min={metrics['stack_free_min_bytes']}; "
+        f"GUARD={metrics['stack_guards']}"
+    )
+    status = metrics["motion_health_status"]
+    detail = f" ({', '.join(failed)})" if failed else ""
+    print(f"Motion health: {status}{detail}")
     return report
 
 
@@ -574,6 +653,19 @@ def _report(report: dict[str, Any], out: Any = sys.stdout) -> bool:
         f"delta={metrics['i2c_error_counts_delta_during_window']}; "
         f"latest HALERR={metrics['hal_error_latest_acc_gyro_angle_probe']}; "
         f"ANGLE_ZERO={metrics['angle_zero_count']}",
+        file=out,
+    )
+    error_rates = metrics["i2c_error_rates"]
+    rate_text = ", ".join(
+        f"{name}={rate:.3%}" if rate is not None else f"{name}=N/A"
+        for name, rate in error_rates.items()
+    )
+    total_rate = metrics["total_i2c_error_rate"]
+    total_rate_text = f"{total_rate:.3%}" if total_rate is not None else "N/A"
+    print(
+        f"I2C transactions: READ cycles={metrics['read_cycles_delta']}; "
+        f"expected={metrics['expected_i2c_transactions']}; "
+        f"errors={metrics['i2c_error_total']}; rates {rate_text}; total={total_rate_text}",
         file=out,
     )
     print(
@@ -697,7 +789,10 @@ def main(argv: list[str] | None = None) -> int:
                                               args.motion_duration)
             motion_pass = all(motion_report["checks"].values())
             report["motion"] = motion_report
-            motion_result = "PASS" if motion_pass else "FAIL"
+            motion_result = (
+                motion_report["metrics"]["motion_health_status"]
+                if motion_pass else "FAIL"
+            )
             report["checks"]["Optional motion check"] = motion_pass
         else:
             report["checks"]["Optional motion check"] = None
@@ -711,16 +806,21 @@ def main(argv: list[str] | None = None) -> int:
             check=False,
         ).stdout.strip()
         final_pass = all(value is not False for value in report["checks"].values())
+        overall_result = (
+            "FAIL" if not final_pass
+            else "PASS WITH WARNING" if motion_result == "PASS WITH WARNING"
+            else "PASS"
+        )
         (run_dir / "summary.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         summary_lines = [
             f"Run directory: {run_dir}", f"Build: {build_result}", f"Flash: {flash_result}",
             f"Motion check: {motion_result}",
-            "REAL JY61P HEALTH: " + ("PASS" if final_pass else "FAIL"),
+            "REAL JY61P HEALTH: " + overall_result,
         ]
         (run_dir / "summary.txt").write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
-        print("REAL JY61P HEALTH: " + ("PASS" if final_pass else "FAIL"))
+        print("REAL JY61P HEALTH: " + overall_result)
         print(f"Artifacts: {run_dir}")
         return 0 if final_pass else 1
     except KeyboardInterrupt:
