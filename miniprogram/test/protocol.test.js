@@ -70,6 +70,41 @@ const recovered = collectFrames([
 assert.deepStrictEqual(recovered.errors, []);
 assert.deepStrictEqual(recovered.frames.map((frame) => frame.type), ['jy', 'imu', 'acc', 'flex']);
 
+const flexLine = 'FLEX|L1=10|L2=20|L3=30|L4=40|L5=50|R1=60|R2=70|R3=80|R4=90|R5=100\r\n';
+const imuLine = 'IMU|R=10.00|P=-5.00|Y=2.00\r\n';
+const accLine = 'ACC|X=0.000|Y=0.000|Z=1.000|VALID=1\r\n';
+function splitEvenly(text, count) {
+  const chunks = [];
+  for (let index = 0; index < count; index += 1) {
+    const start = Math.floor(text.length * index / count);
+    const end = Math.floor(text.length * (index + 1) / count);
+    chunks.push(text.slice(start, end));
+  }
+  return chunks;
+}
+
+for (const chunks of [
+  [flexLine],
+  splitEvenly(flexLine, 2),
+  splitEvenly(flexLine, 5)
+]) {
+  const parsed = collectFrames(chunks);
+  assert.deepStrictEqual(parsed.errors, []);
+  assert.strictEqual(parsed.frames.length, 1, 'one BLE stream line must survive whole or fragmented notifications');
+  assert.strictEqual(parsed.frames[0].type, 'flex');
+  assert.deepStrictEqual([...parsed.frames[0].left, ...parsed.frames[0].right], [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]);
+}
+
+const coalesced = collectFrames([`${flexLine}${imuLine}${accLine}`]);
+assert.deepStrictEqual(coalesced.errors, []);
+assert.deepStrictEqual(coalesced.frames.map((frame) => frame.type), ['flex', 'imu', 'acc']);
+assert.deepStrictEqual(coalesced.frames[1], { type: 'imu', roll: 10, pitch: -5, yaw: 2 });
+assert.deepStrictEqual(coalesced.frames[2], { type: 'acc', x: 0, y: 0, z: 1, valid: true, unit: 'g' });
+
+const crlfSplit = collectFrames([`${imuLine.slice(0, -1)}\r`, '\n']);
+assert.deepStrictEqual(crlfSplit.errors, []);
+assert.deepStrictEqual(crlfSplit.frames, [{ type: 'imu', roll: 10, pitch: -5, yaw: 2 }], 'CRLF split across notifications must terminate the frame');
+
 const overflowRecovered = collectFrames([
   `${'x'.repeat(MAX_TEXT_BUFFER_LENGTH + 32)}FLEX|L1=1|L2=2|L3=3|L4=4|L5=5|R1=6|R2=7|R3=8|R4=9|R5=10`,
   '\r\n'
@@ -78,6 +113,10 @@ assert.deepStrictEqual(overflowRecovered.frames, [{
   type: 'flex', left: [1, 2, 3, 4, 5], right: [6, 7, 8, 9, 10]
 }]);
 assert.deepStrictEqual(overflowRecovered.errors, ['协议缓冲过长，已从最新帧头重新同步']);
+
+const oversizedIncomplete = collectFrames([`FLEX|${'x'.repeat(MAX_TEXT_BUFFER_LENGTH)}`, '\r\n']);
+assert.deepStrictEqual(oversizedIncomplete.frames, []);
+assert.deepStrictEqual(oversizedIncomplete.errors, ['协议缓冲过长，已从最新帧头重新同步'], 'oversized incomplete frames must be discarded after bounded resync');
 
 assert.deepStrictEqual(
   parseLine('ALARM_STATE|BOOT=42|ACTIVE=0|ID=0|TYPE=0'),

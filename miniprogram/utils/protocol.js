@@ -335,7 +335,11 @@ function createProtocolParser(callbacks = {}) {
     const starts = FRAME_PREFIXES
       .map((prefix) => textBuffer.lastIndexOf(prefix))
       .filter((index) => index >= 0);
-    textBuffer = starts.length ? textBuffer.slice(Math.max(...starts)) : '';
+    const latestFrameStart = starts.length ? Math.max(...starts) : -1;
+    const recovered = latestFrameStart >= 0 ? textBuffer.slice(latestFrameStart) : '';
+    // A malformed/incomplete frame can itself exceed the limit. Never retain
+    // that oversized suffix, or repeated BLE chunks would grow memory forever.
+    textBuffer = recovered.length <= MAX_TEXT_BUFFER_LENGTH ? recovered : '';
     onError(new Error('协议缓冲过长，已从最新帧头重新同步'));
   }
 

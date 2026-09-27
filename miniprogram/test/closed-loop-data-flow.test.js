@@ -6,6 +6,7 @@ const storage = {};
 let definition;
 let now = 10000;
 let spoken = [];
+let bluetoothCallbacks;
 const originalNow = Date.now;
 
 global.wx = {
@@ -30,13 +31,16 @@ storage[STORAGE_KEY] = [gesture];
 
 let bluetoothOperations = 0;
 const runtime = createAppState({
-  bluetoothFactory: () => ({
-    startDiscovery() { bluetoothOperations += 1; },
-    connect() { bluetoothOperations += 1; },
-    disconnect() { bluetoothOperations += 1; },
-    closeAdapter() { bluetoothOperations += 1; },
-    write() { bluetoothOperations += 1; }
-  })
+  bluetoothFactory: (callbacks) => {
+    bluetoothCallbacks = callbacks;
+    return {
+      startDiscovery() { bluetoothOperations += 1; },
+      connect() { bluetoothOperations += 1; },
+      disconnect() { bluetoothOperations += 1; },
+      closeAdapter() { bluetoothOperations += 1; },
+      write() { bluetoothOperations += 1; }
+    };
+  }
 });
 global.getApp = () => ({ getRuntime: () => runtime });
 require('../pages/translation/translation');
@@ -80,6 +84,20 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 45));
   assert.deepStrictEqual(spoken, ['闭环测试语音'], `静止手势应通过正式识别链路播报：${JSON.stringify({ recognition: runtime.getState().recognition, pageRecognition: page.data.recognition, translation: page.data.translation, lastFlexAt: runtime.getState().lastFlexAt, lastMatchedFlexAt: page.lastMatchedFlexAt, flex: runtime.getState().flex, enabledFingers: runtime.getState().calibration.enabledFingers, gestures: page.gestures })}`);
   assert.strictEqual(bluetoothOperations, 0, '闭环流程不得调用任何 BLE 连接或写入 API');
+
+  const deviceId = 'parser-reconnect-test-device';
+  bluetoothCallbacks.onStateChange({ connected: true, deviceId, deviceName: 'JDY-23' });
+  const staleFlex = 'FLEX|L1=90|L2=90|L3=90|L4=90|L5=90|R1=90|R2=90|R3=90|R4=90|R5=90\r\n';
+  const splitAt = staleFlex.lastIndexOf('R5=') + 3;
+  bluetoothCallbacks.onValueChange(Buffer.from(staleFlex.slice(0, splitAt)), { deviceId });
+  bluetoothCallbacks.onStateChange({ connected: false, deviceId, message: 'mock unexpected disconnect' });
+  bluetoothCallbacks.onStateChange({ connected: true, deviceId, deviceName: 'JDY-23' });
+  bluetoothCallbacks.onValueChange(Buffer.from(staleFlex.slice(splitAt)), { deviceId });
+  assert.deepStrictEqual(runtime.getState().flex, Array(10).fill(10), 'a stale partial FLEX frame must not cross a disconnect/reconnect boundary');
+
+  const freshFlex = 'FLEX|L1=20|L2=20|L3=20|L4=20|L5=20|R1=20|R2=20|R3=20|R4=20|R5=20\r\n';
+  bluetoothCallbacks.onValueChange(Buffer.from(freshFlex), { deviceId });
+  assert.deepStrictEqual(runtime.getState().flex, Array(10).fill(20), 'valid frames after reconnect must still parse normally');
 
   page.onHide();
   page.onUnload();

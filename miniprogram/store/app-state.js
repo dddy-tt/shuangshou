@@ -748,6 +748,9 @@ function createAppState(options = {}) {
       const deviceChanged = nextDeviceId !== lastDeviceId;
       const disconnected = next.connected === false;
       if (deviceChanged || disconnected) {
+        // Drop any partial line from the old BLE stream so a reconnect cannot
+        // join its tail to bytes from the new connection.
+        parser.reset();
         lastDeviceId = nextDeviceId;
         currentDeviceBoot = null;
         dynamicJYReceived = false;
